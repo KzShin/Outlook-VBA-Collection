@@ -16,8 +16,8 @@
 * Windows 10 / 11
 * Microsoft Outlook (Classic Desktop)
 * [7-Zip](https://7-zip.opensource.jp/)
-* デフォルトインストールパス: `C:\Program Files\7-Zip\7z.exe`
-* ※異なる場所にインストールしている場合は `config.ini` で指定可能です。
+    * デフォルトインストールパス: `C:\Program Files\7-Zip\7z.exe`
+    * ※異なる場所にインストールしている場合は `config.ini` で指定可能です。
 
 
 * **共通モジュール**: `modLogger.bas` (本リポジトリに含まれる共通ログモジュール)
@@ -43,25 +43,8 @@
         ```vb
         ' 選択したメールの添付ファイルを保存・解凍するマクロ
         Public Sub メールをダウンロードフォルダに保存()
-            On Error GoTo EH
-
-            ' RunID 生成 (yymmdd-hhnnss-SAVE)
-            Dim runId As String
-            runId = Format(Now, "yymmdd-hhnnss") & "-SAVE"
-
-            ' ログ機能の初期化（IDセット）
-            modLogger.SetRunId runId
-
-            ' メイン処理の実行
+            ' modMailSevenZip内でRunID生成・ログ出力まで完結するため、直接呼び出します
             modMailSevenZip.SaveAndExtractAttachments
-
-            ' 後片付け
-            modLogger.SetRunId "NoID"
-            Exit Sub
-
-        EH:
-            modLogger.Log "ThisOutlookSession", "ERROR: " & Err.Description
-            MsgBox "エラーが発生しました: " & Err.Number & vbCrLf & Err.Description, vbCritical
         End Sub
 
         ```
@@ -143,13 +126,13 @@
 * **ファイル名**: `yyyy-mm-dd.log` (日付ごとのローテーション)
 * **文字コード**: UTF-8
 * **ログ出力例:**
-```text
-2026/02/16 12:00:00.123 [260216-120000-SAVE] [MailSevenZip] === START メール保存・解凍処理 ===
-2026/02/16 12:00:00.250 [260216-120000-SAVE] [MailSevenZip] 対象メール：Subject="請求書送付" / Received=2026/02/16 10:00:00
-...
-2026/02/16 12:00:05.500 [260216-120000-SAVE] [MailSevenZip] テスト成功："pass_0216" → 抽出へ
+    ```text
+    2026/02/16 12:00:00.123 [260216-120000-SAVE] [MailSevenZip] === START メール保存・解凍処理 ===
+    2026/02/16 12:00:00.250 [260216-120000-SAVE] [MailSevenZip] 対象メール：Subject="請求書送付" / Received=2026/02/16 10:00:00
+    ...
+    2026/02/16 12:00:05.500 [260216-120000-SAVE] [MailSevenZip] テスト成功："pass_0216" → 抽出へ
 
-```
+    ```
 
 
 
