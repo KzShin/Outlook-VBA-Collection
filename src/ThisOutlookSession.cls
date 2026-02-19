@@ -34,27 +34,8 @@ End Sub
 
 ' 選択したメールの添付ファイルを保存・解凍するマクロ
 Public Sub メールをダウンロードフォルダに保存()
-    On Error GoTo EH
-
-    ' RunID 生成 (yymmdd-hhnnss-SAVE)
-    Dim runId As String
-    runId = Format(Now, "yymmdd-hhnnss") & "-SAVE"
-
-    ' ログ機能の初期化（IDセット）
-    ' modMailSevenZipは、呼び出し元でIDがセットされていることを前提としています
-    modLogger.SetRunId runId
-
-    ' メイン処理の実行
-    ' 変更: 英語名メソッドへの呼び出し
+    ' modMailSevenZip内でRunID生成・ログ出力まで完結するよう変更したため、直接呼び出します
     modMailSevenZip.SaveAndExtractAttachments
-
-    ' 後片付け
-    modLogger.SetRunId "NoID"
-    Exit Sub
-
-EH:
-    modLogger.Log "ThisOutlookSession", "ERROR: " & Err.Description
-    MsgBox "エラーが発生しました: " & Err.Number & vbCrLf & Err.Description, vbCritical
 End Sub
 
 ' WEB版Outlook (OWA) を開くマクロ

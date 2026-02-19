@@ -10,9 +10,7 @@ Option Explicit
 ' ==============================================================================
 
 ' --- ThisOutlookSessionでの呼び出し例 ---
-' Public Sub SaveMailAttachmentsMacro()
-'     Dim rid As String: rid = Format(Now, "yymmdd-hhnnss") & "-SAVE"
-'     modLogger.SetRunId rid
+' Public Sub メールをダウンロードフォルダに保存()
 '     modMailSevenZip.SaveAndExtractAttachments
 ' End Sub
 
@@ -30,9 +28,14 @@ End Sub
 ' ==============================================================================
 
 ' 選択したメールを保存し、アーカイブであれば解凍を試みる
-' 変更: メソッド名を英語(PascalCase)に統一
 Public Sub SaveAndExtractAttachments()
     On Error GoTo EH
+    
+    ' --- 変更: 実行IDをモジュール内部で生成・セットする（自己完結化） ---
+    Dim runId As String
+    runId = Format(Now, "yymmdd-hhnnss") & "-SAVE"
+    modLogger.SetRunId runId
+    
     Log "=== START メール保存・解凍処理 ==="
     
     ' 1. メール選択チェック
@@ -40,6 +43,7 @@ Public Sub SaveAndExtractAttachments()
     If Application.ActiveExplorer.Selection.Count = 0 Then
         MsgBox "メールを選択してください。", vbExclamation
         Log "選択なし：処理終了"
+        modLogger.SetRunId "NoID" ' IDリセット
         Exit Sub
     End If
     
@@ -47,6 +51,7 @@ Public Sub SaveAndExtractAttachments()
     If objItem.Class <> olMail Then
         MsgBox "選択されたアイテムはメールではありません。", vbExclamation
         Log "非メールアイテム：Class=" & objItem.Class & " : 処理終了"
+        modLogger.SetRunId "NoID" ' IDリセット
         Exit Sub
     End If
     
@@ -73,6 +78,7 @@ Public Sub SaveAndExtractAttachments()
         MsgBox "保存先フォルダが既に存在します。既存フォルダを開きます。" & vbCrLf & rootPath, vbInformation
         Log "既存フォルダ検出：処理中止 " & rootPath
         Shell "explorer.exe " & """" & rootPath & """", vbNormalFocus
+        modLogger.SetRunId "NoID" ' IDリセット
         Exit Sub
     End If
     
@@ -153,11 +159,15 @@ Public Sub SaveAndExtractAttachments()
     Shell "explorer.exe " & """" & rootPath & """", vbNormalFocus
     
     Log "=== END メール保存・解凍処理 ==="
+    
+    ' --- 変更: 他の処理に引き継がせないようIDをリセット ---
+    modLogger.SetRunId "NoID"
     Exit Sub
 
 EH:
     Log "ERROR #" & Err.Number & " : " & Err.Description
     MsgBox "エラーが発生しました: " & Err.Number & vbCrLf & Err.Description, vbCritical
+    modLogger.SetRunId "NoID" ' エラー時もリセット
 End Sub
 
 
@@ -317,15 +327,19 @@ Private Function SevenZipTest(ByVal zipPath As String, ByVal sevenZipPath As Str
     Dim sh As Object
     Set sh = CreateObject("WScript.Shell")
 
+    Dim baseCmd As String
+    baseCmd = """" & sevenZipPath & """ t -y " & _
+              """" & zipPath & """" & _
+              " -bso0 -bse0 -bsp0"
+
     Dim cmd As String
-    cmd = """" & sevenZipPath & """ t -y " & _
-          """" & zipPath & """" & _
-          " -bso0 -bse0 -bsp0"
+    Dim logCmd As String
+    
+    cmd = baseCmd & " -p""" & password & """"
+    ' ログ用のコマンドはパスワードをマスクする
+    logCmd = baseCmd & " -p""" & MaskPassword(password) & """"
 
-    ' パスワード指定（空でも -p"" を明示して対話モードを回避）
-    cmd = cmd & " -p""" & password & """"
-
-    Log "7zテスト起動：" & cmd
+    Log "7zテスト起動：" & logCmd
     Dim proc As Object
     Set proc = sh.Exec(cmd)
 
@@ -340,16 +354,24 @@ Private Function SevenZipExtract(ByVal zipPath As String, ByVal outDir As String
     Dim sh As Object
     Set sh = CreateObject("WScript.Shell")
 
+    Dim baseCmd As String
+    baseCmd = """" & sevenZipPath & """ x -y " & _
+              """" & zipPath & """ -o""" & outDir & """" & _
+              " -bso0 -bse0 -bsp0"
+
     Dim cmd As String
-    cmd = """" & sevenZipPath & """ x -y " & _
-          """" & zipPath & """ -o""" & outDir & """" & _
-          " -bso0 -bse0 -bsp0"
+    Dim logCmd As String
+    
+    cmd = baseCmd
+    logCmd = baseCmd
 
     If Len(password) > 0 Then
         cmd = cmd & " -p""" & password & """"
+        ' ログ用のコマンドはパスワードをマスクする
+        logCmd = logCmd & " -p""" & MaskPassword(password) & """"
     End If
 
-    Log "7z抽出起動：" & cmd
+    Log "7z抽出起動：" & logCmd
     Dim proc As Object
     Set proc = sh.Exec(cmd)
 
@@ -441,7 +463,8 @@ Private Function LoadPasswordsFromFile(ByVal filePath As String, _
 
             outCol.Add expanded
             cnt = cnt + 1
-            Log "候補追加：" & expanded
+            ' ログ出力時のみパスワードをマスクする
+            Log "候補追加：" & MaskPassword(expanded)
         End If
     Next i
 
@@ -535,6 +558,29 @@ End Sub
 ' ==============================================================================
 ' [Utils] ファイル・テキスト操作ユーティリティ
 ' ==============================================================================
+
+' パスワードのマスク処理（1文字おきに * に置換）
+Private Function MaskPassword(ByVal pw As String) As String
+    If Len(pw) = 0 Then
+        MaskPassword = ""
+        Exit Function
+    End If
+    
+    Dim i As Long
+    Dim res As String
+    res = ""
+    
+    For i = 1 To Len(pw)
+        ' 奇数番目は元の文字、偶数番目は * にする
+        If i Mod 2 = 1 Then
+            res = res & Mid$(pw, i, 1)
+        Else
+            res = res & "*"
+        End If
+    Next i
+    
+    MaskPassword = res
+End Function
 
 ' フォルダ内のファイル存在確認（再帰）
 Private Function HasNonZeroFileDeep(ByVal folderPath As String) As Boolean
@@ -661,4 +707,3 @@ Private Sub WriteTextUtf8(ByVal path As String, ByVal text As String)
     stm.SaveToFile path, 2 ' adSaveCreateOverWrite
     stm.Close
 End Sub
-

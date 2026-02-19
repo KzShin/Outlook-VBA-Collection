@@ -216,7 +216,7 @@ End Function
 Private Function CheckArchiveEncryption(ByVal path As String) As Boolean
     On Error GoTo EH
     
-    ' 変更: modLoggerから共通の7-Zipパスを取得
+    ' modLoggerから共通の7-Zipパスを取得
     Dim sevenZipPath As String
     sevenZipPath = modLogger.GetSevenZipPath()
     
@@ -282,18 +282,37 @@ Private Function CheckSendTime(ByRef m As Outlook.MailItem) As Boolean
     Dim isBizDay As Boolean: isBizDay = IsBusinessDay(nowTime)
     
     Dim t As Date: t = TimeValue(nowTime)
-    Dim isLate As Boolean: isLate = (t >= TimeValue("18:00:00"))
-    Dim isEarly As Boolean: isEarly = (t < TimeValue("08:00:00"))
+    
+    ' 設定ファイルから業務時間を取得（デフォルト 08:00 ～ 18:00）
+    Dim startTimeStr As String: startTimeStr = GetConfigValue("WorkStartTime", "08:00")
+    Dim endTimeStr As String: endTimeStr = GetConfigValue("WorkEndTime", "18:00")
+    
+    ' 秒数が省略されている場合は付与
+    If Len(startTimeStr) = 5 Then startTimeStr = startTimeStr & ":00"
+    If Len(endTimeStr) = 5 Then endTimeStr = endTimeStr & ":00"
+    
+    Dim startVal As Date, endVal As Date
+    On Error Resume Next
+    startVal = TimeValue(startTimeStr)
+    If Err.Number <> 0 Then startVal = TimeValue("08:00:00")
+    Err.Clear
+    endVal = TimeValue(endTimeStr)
+    If Err.Number <> 0 Then endVal = TimeValue("18:00:00")
+    On Error GoTo 0
+    
+    ' 時間外判定
+    Dim isLate As Boolean: isLate = (t >= endVal)
+    Dim isEarly As Boolean: isEarly = (t < startVal)
     
     Dim deferAt As Date
     Dim needConfirmation As Boolean
     
     If isLate Or isEarly Then
-        deferAt = CalcDeferTime(nowTime)
+        deferAt = CalcDeferTime(nowTime, startVal, endVal)
         needConfirmation = True
         Log "Step3 Status: Night/Early. Candidate=" & deferAt
     ElseIf Not isBizDay Then
-        deferAt = NextBusinessDayAt8FromDate(nowTime)
+        deferAt = NextBusinessDayAtTime(nowTime, startVal)
         needConfirmation = True
         Log "Step3 Status: Holiday. Candidate=" & deferAt
     Else
@@ -355,28 +374,30 @@ Private Function IsHoliday(ByVal d As Date) As Boolean
     IsHoliday = False
 End Function
 
-Private Function NextBusinessDayAt8FromDate(ByVal baseDate As Date) As Date
+' 指定した日付から、翌営業日の指定時刻(timeVal)を算出する
+Private Function NextBusinessDayAtTime(ByVal baseDate As Date, ByVal timeVal As Date) As Date
     Dim d As Date: d = DateValue(baseDate) + 1
     Do While Not IsBusinessDay(d)
         d = d + 1
     Loop
-    NextBusinessDayAt8FromDate = d + TimeValue("08:00:00")
+    NextBusinessDayAtTime = d + timeVal
 End Function
 
-Private Function CalcDeferTime(ByVal baseTime As Date) As Date
+' 現在時刻と業務時間設定に基づき、予約送信時刻を算出する
+Private Function CalcDeferTime(ByVal baseTime As Date, ByVal startVal As Date, ByVal endVal As Date) As Date
     Dim today As Date: today = DateValue(baseTime)
     Dim t As Date: t = TimeValue(baseTime)
     
-    If t >= TimeValue("18:00:00") Then
-        CalcDeferTime = NextBusinessDayAt8FromDate(today)
-    ElseIf t < TimeValue("08:00:00") Then
+    If t >= endVal Then
+        CalcDeferTime = NextBusinessDayAtTime(today, startVal)
+    ElseIf t < startVal Then
         If IsBusinessDay(today) Then
-            CalcDeferTime = today + TimeValue("08:00:00")
+            CalcDeferTime = today + startVal
         Else
-            CalcDeferTime = NextBusinessDayAt8FromDate(today)
+            CalcDeferTime = NextBusinessDayAtTime(today, startVal)
         End If
     Else
-        CalcDeferTime = NextBusinessDayAt8FromDate(today)
+        CalcDeferTime = NextBusinessDayAtTime(today, startVal)
     End If
 End Function
 
@@ -493,3 +514,4 @@ Private Function MsgBoxResultToJa(ByVal r As VbMsgBoxResult) As String
         Case Else: MsgBoxResultToJa = "Unknown"
     End Select
 End Function
+
