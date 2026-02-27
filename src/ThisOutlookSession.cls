@@ -43,3 +43,9 @@ Public Sub WEB版Outlook起動()
     ' modLaunchOWA内でRunID生成・ログ出力まで完結しているため、直接呼び出します
     modLaunchOWA.LaunchOWA
 End Sub
+
+' 選択したメールをPDFとして印刷するマクロ
+Public Sub 選択メールをPDF化()
+    ' modMailToPDF内でRunID生成・ログ出力まで完結するため、直接呼び出します
+    modMailToPDF.PrintMailToPDF
+End Sub
