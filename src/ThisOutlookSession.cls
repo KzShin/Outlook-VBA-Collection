@@ -97,3 +97,13 @@ Public Sub 選択メールをPDF化()
     ' modMailToPDF内でRunID生成・ログ出力まで完結するため、直接呼び出します
     modMailToPDF.PrintMailToPDF
 End Sub
+
+' 選択したメールを下書きへ転送するマクロ
+Public Sub 転送メールを下書き作成()
+    modForwardDraft.CreateForwardDraft
+End Sub
+
+' テンプレートから新規メールを作成するマクロ
+Public Sub テンプレートからメールを作成()
+    modTemplateMail.CreateMailFromTemplate
+End Sub

@@ -11,30 +11,43 @@
 | **modMailToPDF** | **メールのPDF化**。<br>選択したメールをPDFプリンタ経由で素早くPDF化します。処理後は元のプリンタへ自動的に復元されます。 |
 | **modLaunchOWA** | **Web版Outlook起動**。<br>現在使用しているアカウントで OWA (Outlook on the Web) を素早くブラウザで開きます。 |
 | **modMailOpen** | **メール開封制御**。<br>マウスクリック等による誤ったポップアップを防ぎ、ショートカットキーでのみメールを開封できるように制御します。 |
+| **modForwardDraft** | **転送メール下書き作成**。<br>選択したメールをテキスト形式に変換し、事前に設定した宛先と定型文を挿入した転送用下書きをワンクリックで作成します。 |
+| **modTemplateMail** | **テンプレートメール作成**。<br>テンプレート一覧から選択し、日付・曜日・和暦（令和）の変数を自動置換して新規テキスト形式メールを作成します。 |
 | **modLogger** | **共通ログ管理**。<br>全モジュールの動作ログを記録・管理します。自動アーカイブ機能付き。 |
 ## 必要要件
 * Windows 10 / 11
 * Microsoft Outlook (Classic Desktop)
 * [7-Zip](https://7-zip.opensource.jp/) (modSendController, modMailSevenZip で使用)
 ## インストール方法
-1. **ソースコードのインポート**
-    * Outlookで `Alt + F11` を押して VBA エディタを開きます。
-    * `src/` フォルダ内の `.bas` ファイルをすべてインポートします。
-    * **必須**: `modLogger.bas`
-    * **選択**: 使用したい機能のモジュール（例: `modSendController.bas`）
-2. **設定ファイルの配置**
-    * エクスプローラーで `%APPDATA%` を開き、`OutlookVBA` という名前のフォルダを作成します。
-    * パス例: `C:\Users\ユーザー名\AppData\Roaming\OutlookVBA\`
-    * `configs/` フォルダ内のサンプルファイルを参考に、以下のファイルを作成・配置してください（文字コードは **UTF-8**）。
+
+### ⚠️ 0. 文字コードの変換 (重要)
+本リポジトリではGitHub上での可読性を優先し、VBAのソースコード（`.bas`, `.cls`, `.frm`）を **UTF-8 (BOMなし)** で管理しています。
+Outlookへインポートする前に、必ず同梱の変換スクリプトを使用して **Shift-JIS** へ変換してください。
+（※ `.frx` ファイルはバイナリデータのため、手動で文字コード変換しないでください。フォームが破損します。）
+
+**変換手順 (PowerShell):**
+```powershell
+.\Convert-Encoding.ps1 -From UTF8 -To ShiftJIS
+```
+
+### 1. **ソースコードのインポート**
+   * Outlookで `Alt + F11` を押して VBA エディタを開きます。
+   * `src/` フォルダ内の `.bas` ファイルをすべてインポートします。
+   * **必須**: `modLogger.bas`
+   * **選択**: 使用したい機能のモジュール（例: `modSendController.bas`）
+### 2. **設定ファイルの配置**
+   * エクスプローラーで `%APPDATA%` を開き、`OutlookVBA` という名前のフォルダを作成します。
+   * パス例: `C:\Users\ユーザー名\AppData\Roaming\OutlookVBA\`
+   * `configs/` フォルダ内のサンプルファイルを参考に、以下のファイルを作成・配置してください（文字コードは **UTF-8**）。
 
         | ファイル名 | 用途 | 元ファイル(参考) |
         | --- | --- | --- |
         | **config.ini** | 全ツールの統合設定 | `configs/config.sample.ini` |
         | **SevenZipPasswords.txt** | 7-Zip解凍用パスワードリスト | `configs/SevenZipPasswords.sample.txt` |
 
-3. **マクロの有効化**
-    * `src/ThisOutlookSession.cls` の内容を参考に、Outlookの `ThisOutlookSession` モジュールにコードを記述します。
-    * これにより、メール受信時や送信時に自動的にツールが実行されるようになります。
+### 3. **マクロの有効化**
+   * `src/ThisOutlookSession.cls` の内容を参考に、Outlookの `ThisOutlookSession` モジュールにコードを記述します。
+   * これにより、メール受信時や送信時に自動的にツールが実行されるようになります。
 ## ディレクトリ構成
 * `src/`: VBAソースコード
 * `configs/`: 設定ファイルのサンプル (ini, txt)
