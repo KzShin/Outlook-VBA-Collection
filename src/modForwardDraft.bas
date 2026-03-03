@@ -3,7 +3,7 @@ Option Explicit
 
 ' ==============================================================================
 ' Module: modForwardDraft
-' Description: 選択したメールを指定の宛先へ転送する下書きを作成する（テキスト形式強制）
+' Description: 選択したメールを指定の宛先へ転送する下書きを作成する（テキスト形式強制・複数宛先対応）
 ' Dependencies: Scripting.FileSystemObject, ADODB.Stream, modLogger, frmSelectDest
 ' Configuration: %APPDATA%\OutlookVBA\config.ini ([ForwardMail] Section)
 ' ==============================================================================
@@ -124,13 +124,13 @@ Private Sub CreateAndSaveDraft(ByVal origMail As Outlook.MailItem, ByVal destNam
     Dim fwMail As Outlook.MailItem
     Set fwMail = origMail.Forward
     
-    ' 宛先の設定
+    ' 宛先の設定（複数アドレスがセミコロン区切りで入っていれば自動認識される）
     fwMail.To = destEmail
     
     ' HTMLメール等であってもテキスト形式に強制変換 (olFormatPlain = 1)
     fwMail.BodyFormat = olFormatPlain
     
-    ' 本文の先頭に定型文を挿入（「様」は付けない）
+    ' 本文の先頭に定型文を挿入
     fwMail.Body = destName & vbCrLf & vbCrLf & _
                   "転送します。" & vbCrLf & vbCrLf & _
                   fwMail.Body
@@ -177,6 +177,7 @@ Private Function LoadForwardDestinations() As Object
     Dim i As Long, lineText As String
     Dim currentSection As String
     Dim parts() As String, destParts() As String
+    Dim emails As String
     
     For i = LBound(lines) To UBound(lines)
         lineText = Trim$(lines(i))
@@ -190,11 +191,16 @@ Private Function LoadForwardDestinations() As Object
             ElseIf currentSection = "forwardmail" Then
                 parts = Split(lineText, "=", 2)
                 If UBound(parts) = 1 Then
-                    ' 値をカンマで分割 (表示名 , メールアドレス)
-                    destParts = Split(parts(1), ",")
-                    If UBound(destParts) >= 1 Then
-                        ' Dictionary に追加 (Key:表示名, Value:アドレス)
-                        dict.Add Trim$(destParts(0)), Trim$(destParts(1))
+                    ' 値をカンマで「2つ」に分割 (表示名 , アドレス群)
+                    ' ※これで、アドレス側にカンマが含まれていても分割されません
+                    destParts = Split(parts(1), ",", 2)
+                    If UBound(destParts) = 1 Then
+                        ' メールアドレスに含まれる可能性のあるカンマをセミコロンに変換
+                        ' （ユーザーが間違えてカンマで区切っても自動補正します）
+                        emails = Replace(Trim$(destParts(1)), ",", ";")
+                        
+                        ' Dictionary に追加 (Key:表示名, Value:セミコロン区切りのアドレス群)
+                        dict.Add Trim$(destParts(0)), emails
                     End If
                 End If
             End If
