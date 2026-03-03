@@ -5,9 +5,13 @@ SevenZipPasswords.txt
 # ログファイル等があればそれも無視
 *.log
 
+# PDFファイルも無視
+*.pdf
+
 # "old" "logs"という名前のフォルダを（階層問わず）すべて無視
 old/
 logs/
+pdf/
 
 # Created by https://www.toptal.com/developers/gitignore/api/windows,visualstudio,visualstudiocode,python,powershell,java,csharp,c++,go,batch
 # Edit at https://www.toptal.com/developers/gitignore?templates=windows,visualstudio,visualstudiocode,python,powershell,java,csharp,c++,go,batch

@@ -1,9 +1,3 @@
-`modSendController.bas` での業務時間（開始・終了）のカスタマイズ機能追加に合わせて、マニュアル (`docs/modSendController_Manual.md`) の内容を修正しました。
-
-「特徴」の記述をハードコーディングから設定連動の表現に変更し、「設定」の項目に `WorkStartTime` と `WorkEndTime` の説明を追加しています。
-
----
-
 # Outlook Mail Send Controller (modSendController)
 
 これは、OutlookのVBAマクロです。メール送信ボタンが押されたタイミングで割り込み処理を行い、誤送信防止（添付忘れ、セキュリティチェック）および送信日時の自動制御（時間外・休日送信の予約）を行います。
@@ -64,7 +58,7 @@
             ' コントローラーへ処理を委譲
             modSendController.Execute Item, Cancel
         End Sub
-
+    
         ```
 
 
@@ -88,19 +82,19 @@
         # [共通] 7-Zipの実行ファイルパス
         # 7-Zipがデフォルト以外の場所にインストールされている場合のみ変更してください。
         SevenZipPath=C:\Program Files\7-Zip\7z.exe
-
+    
         [SendController]
         # [誤送信防止] 送信保留する祝日リスト (MM-DD形式, カンマ区切り)
         # 土日に加えて、ここで指定した日付も「休日」とみなし、翌営業日送信を提案します。
         # 例: 年末年始休暇など
         HolidayList=12-29,12-30,12-31,01-01,01-02,01-03
-
+    
         # 業務開始時間（兼 翌営業日の予約送信時刻）
         WorkStartTime=08:00
-
+    
         # 業務終了時間（この時間以降の送信は翌営業日扱いで提案）
         WorkEndTime=18:00
-
+    
         ```
 
 
@@ -127,7 +121,7 @@
 
 
     **ログ出力例:**
-
+    
     ```text
     2026/02/16 20:00:00.123 [260216-200000-SEND] [SendController] === START SendController ===
     2026/02/16 20:00:00.125 [260216-200000-SEND] [SendController] Subject=テストメール / Attachments=1
@@ -136,7 +130,7 @@
     2026/02/16 20:00:00.500 [260216-200000-SEND] [SendController] Step3 Status: Night/Early. Candidate=2026/02/17 08:00:00
     2026/02/16 20:00:05.000 [260216-200000-SEND] [SendController] Step3 User Selection: Yes
     2026/02/16 20:00:05.010 [260216-200000-SEND] [SendController] === END SendController / Cancel=False ===
-
+    
     ```
 
 ## ライセンス
