@@ -32,24 +32,17 @@
         2. `src/modMailSevenZip.bas` (メイン機能モジュール)
 
 
-
-
 4. **ThisOutlookSessionの設定**:
     * VBAエディタ左側の `Project1` > `Microsoft Outlook Objects` > `ThisOutlookSession` をダブルクリックします。
     * 同梱の `src/ThisOutlookSession.cls` の中身をコピーし、貼り付けます。
     * または、以下のプロシージャを追加してください。
-
-
-        ```vb
-        ' 選択したメールの添付ファイルを保存・解凍するマクロ
-        Public Sub メールをダウンロードフォルダに保存()
-            ' modMailSevenZip内でRunID生成・ログ出力まで完結するため、直接呼び出します
-            modMailSevenZip.SaveAndExtractAttachments
-        End Sub
-
-        ```
-
-
+       ```vb
+       ' 選択したメールの添付ファイルを保存・解凍するマクロ
+       Public Sub メールをダウンロードフォルダに保存()
+           ' modMailSevenZip内でRunID生成・ログ出力まで完結するため、直接呼び出します
+           modMailSevenZip.SaveAndExtractAttachments
+       End Sub
+       ```
 
 ## 設定（パスワードリスト）
 
@@ -67,28 +60,18 @@
 3. **リストの編集**:
     * テキストエディタで開き、よく使うパスワードパターンを記述します。
     * **重要**: 文字コードは **UTF-8** で保存してください。
-
-
-        ```text
-        # コメント行
-        mytag{mm}{dd}
-        pass_{yyyy}
-        fixed_password
-
-        ```
-
-
+      ```text
+      # コメント行
+      mytag{mm}{dd}
+      pass_{yyyy}
+      fixed_password
+      ```
         * **テンプレート変数**:
         * `{yyyy}`: 西暦4桁 (例: 2026)
         * `{yy}`: 西暦下2桁 (例: 26)
         * `{mm}`: 月2桁 (例: 02)
         * `{dd}`: 日2桁 (例: 15)
         * ※ 変数は**メールの受信日**に置換されます。
-
-
-
-
-
 ## 設定（7-Zipパスなど）
 
 7-Zipのインストール先が標準と異なる場合などは、共通設定ファイル `config.ini` を編集します。
@@ -99,10 +82,7 @@
     [General]
     # 7-Zipの実行ファイルパス
     SevenZipPath=D:\Tools\7-Zip\7z.exe
-
     ```
-
-
 
 ## 使い方
 
@@ -114,8 +94,6 @@
 3. 処理が完了すると、保存先のフォルダがエクスプローラで自動的に開きます。
     * 暗号化ZIPが含まれていた場合、解凍済みのフォルダも作成されています。
     * パスワードがリストにない場合、入力ダイアログが表示されます。
-
-
 
 ## ログ
 
@@ -131,10 +109,7 @@
     2026/02/16 12:00:00.250 [260216-120000-SAVE] [MailSevenZip] 対象メール：Subject="請求書送付" / Received=2026/02/16 10:00:00
     ...
     2026/02/16 12:00:05.500 [260216-120000-SAVE] [MailSevenZip] テスト成功："pass_0216" → 抽出へ
-
     ```
-
-
 
 ## ライセンス
 

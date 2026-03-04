@@ -34,22 +34,17 @@
 4. **ThisOutlookSessionの設定**:
     * VBAエディタ左側の `Project1` > `Microsoft Outlook Objects` > `ThisOutlookSession` をダブルクリックします。
     * 以下のコードを貼り付けます（`src/ThisOutlookSession.cls` を参考にしてください）。
-
-
-        ```vb
-        Private Sub Application_Startup()
-            ' 起動時に未読メールをチェック
-            modAutoFlag.ProcessStartupUnread
-        End Sub
-
-        Private Sub Application_NewMailEx(ByVal EntryIDCollection As String)
-            ' 新着メール受信時にチェック
-            modAutoFlag.ProcessNewMail EntryIDCollection
-        End Sub
-
-        ```
-
-
+      ```vb
+      Private Sub Application_Startup()
+          ' 起動時に未読メールをチェック
+          modAutoFlag.ProcessStartupUnread
+      End Sub
+      
+      Private Sub Application_NewMailEx(ByVal EntryIDCollection As String)
+          ' 新着メール受信時にチェック
+          modAutoFlag.ProcessNewMail EntryIDCollection
+      End Sub
+      ```
 
 ## 設定（config.ini）
 
@@ -62,30 +57,25 @@
 
 3. **`[AutoFlag]`** セクションを編集します。
     * **重要**: 保存時の文字コードは必ず **UTF-8 (BOMなし推奨)** にしてください。Shift-JISでは文字化けします。
-
-
-        ```ini
-        [AutoFlag]
-        # 行頭に「#」をつけるとコメントになります。
-
-        # [MyAddress]
-        # 自分のメールアドレス、またはOutlookでの表示名（例: 山田 太郎）
-        # ToまたはCCにこの文字列が含まれるメールが処理対象になります。
-        MyAddress=taro.yamada@example.com
-
-        # [Pattern]
-        # 本文に含まれるとフラグを立てるキーワード（正規表現）
-        # 複数のキーワードはいずれか(|)で区切ります。
-        Pattern=重要|緊急|要回答|期限
-
-        # [ExcludeSubjects]
-        # 処理から除外したい件名のキーワード（カンマ区切り）
-        # 自動通知メールなどを除外するのに便利です。
-        ExcludeSubjects=さんがメッセージを送信しました,日報,自動通知
-
-        ```
-
-
+       ```ini
+       [AutoFlag]
+       # 行頭に「#」をつけるとコメントになります。
+       
+       # [MyAddress]
+       # 自分のメールアドレス、またはOutlookでの表示名（例: 山田 太郎）
+       # ToまたはCCにこの文字列が含まれるメールが処理対象になります。
+       MyAddress=taro.yamada@example.com
+       
+       # [Pattern]
+       # 本文に含まれるとフラグを立てるキーワード（正規表現）
+       # 複数のキーワードはいずれか(|)で区切ります。
+       Pattern=重要|緊急|要回答|期限
+       
+       # [ExcludeSubjects]
+       # 処理から除外したい件名のキーワード（カンマ区切り）
+       # 自動通知メールなどを除外するのに便利です。
+       ExcludeSubjects=さんがメッセージを送信しました,日報,自動通知
+       ```
 
 ## 使い方
 
@@ -111,7 +101,6 @@
     2026/02/15 09:00:00.150 [260215-090000-BOOT] [AutoFlag] 設定準備完了: Pattern=重要|緊急, Excludes=3件
     2026/02/15 09:00:01.005 [260215-090000-BOOT] [AutoFlag] >>> フラグ設定: プロジェクト進捗について
     2026/02/15 09:00:01.020 [260215-090000-BOOT] [AutoFlag] === END メール自動フラグ処理 (起動時未読チェック) ===
-
     ```
 
 ## ライセンス

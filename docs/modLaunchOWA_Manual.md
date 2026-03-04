@@ -28,18 +28,13 @@
     * VBAエディタ左側の `Project1` > `Microsoft Outlook Objects` > `ThisOutlookSession` をダブルクリックします。
     * 同梱の `src/ThisOutlookSession.cls` の中身をコピーし、貼り付けます。
     * または、以下のプロシージャを追加してください。
-
-
-        ```vb
-        ' WEB版Outlook (OWA) を開くマクロ
-        Public Sub WEB版Outlook起動()
-            ' modLaunchOWA内でRunID生成・ログ出力まで完結しているため、直接呼び出します
-            modLaunchOWA.LaunchOWA
-        End Sub
-
-        ```
-
-
+      ```vb
+      ' WEB版Outlook (OWA) を開くマクロ
+      Public Sub WEB版Outlook起動()
+          ' modLaunchOWA内でRunID生成・ログ出力まで完結しているため、直接呼び出します
+          modLaunchOWA.LaunchOWA
+      End Sub
+      ```
 
 ## 設定 (Configuration)
 
@@ -53,21 +48,16 @@
 2. **設定の編集**:
     * 使用しているアカウントの種類に合わせて `BaseUrl` を設定します。
     * **重要**: 保存時の文字コードは必ず **UTF-8 (BOMなし推奨)** にしてください。
-
-
-        ```ini
-        [LaunchOWA]
-        # Web版OutlookのURL
-
-        # パターンA: 法人用 (Microsoft 365 / Office 365)
-        BaseUrl=https://outlook.office.com/mail/
-
-        # パターンB: 個人用 (Outlook.com / Hotmail)
-        # BaseUrl=https://outlook.live.com/mail/
-
-        ```
-
-
+      ```ini
+      [LaunchOWA]
+      # Web版OutlookのURL
+      
+      # パターンA: 法人用 (Microsoft 365 / Office 365)
+      BaseUrl=https://outlook.office.com/mail/
+      
+      # パターンB: 個人用 (Outlook.com / Hotmail)
+      # BaseUrl=https://outlook.live.com/mail/
+      ```
 
 ## 使い方
 
@@ -84,8 +74,6 @@
     * 追加したボタンをクリックすると、既定のブラウザで Web版Outlook が開きます。
     * ※初回アクセス時はログインを求められる場合があります。
 
-
-
 ## ログ
 
 本ツールは `modLogger` を使用して動作ログを記録します。
@@ -98,10 +86,7 @@
     2026/02/16 09:30:00.130 [260216-093000] [LaunchOWA] Loaded URL from config: https://outlook.office.com/mail/
     2026/02/16 09:30:00.135 [260216-093000] [LaunchOWA] Opening URL...
     2026/02/16 09:30:00.140 [260216-093000] [LaunchOWA] === END OWA Launch ===
-
     ```
-
-
 
 ## ライセンス
 

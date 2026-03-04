@@ -19,8 +19,6 @@
 * ログの自動圧縮機能を使用するために必要です。
 * デフォルトパス: `C:\Program Files\7-Zip\7z.exe` (設定ファイルで変更可能)
 
-
-
 ## インストール
 
 1. このリポジトリのファイルをダウンロードします。
@@ -31,8 +29,6 @@
 
 4. **設定ファイルの配置**:
     * 下記「設定 (Configuration)」セクションの手順に従って初期設定を行います。
-
-
 
 ## 設定 (Configuration)
 
@@ -50,26 +46,22 @@
 
 
 3. **設定の編集**:
+   
     * `config.ini` をテキストエディタで開き、環境に合わせて修正します。
-
-
-        ```ini
-        [General]
-        # [共通] 7-Zipの実行ファイルパス
-        # modLoggerの自動アーカイブ機能で使用されます。
-        SevenZipPath=C:\Program Files\7-Zip\7z.exe
-
-        [Logger]
-        # [共通] ログの保存設定
-        # 保存先フォルダ (%APPDATA% 変数使用可)
-        LogDir=%APPDATA%\OutlookVBA\logs
-
-        # 何日経過したログをZIP圧縮するか
-        ArchiveDays=7
-
-        ```
-
-
+      ```ini
+      [General]
+      # [共通] 7-Zipの実行ファイルパス
+      # modLoggerの自動アーカイブ機能で使用されます。
+      SevenZipPath=C:\Program Files\7-Zip\7z.exe
+      
+      [Logger]
+      # [共通] ログの保存設定
+      # 保存先フォルダ (%APPDATA% 変数使用可)
+      LogDir=%APPDATA%\OutlookVBA\logs
+      
+      # 何日経過したログをZIP圧縮するか
+      ArchiveDays=7
+      ```
 
 ## 使い方 (開発者向け)
 
@@ -86,7 +78,6 @@ runId = Format(Now, "yymmdd-hhnnss") & "-MYPROC"
 
 ' IDをセット
 modLogger.SetRunId runId
-
 ```
 
 ### 2. ログ出力
@@ -97,7 +88,6 @@ modLogger.SetRunId runId
 modLogger.Log "MyModule", "処理を開始します"
 ' ...
 modLogger.Log "MyModule", "件数: " & count
-
 ```
 
 ## ログ出力仕様
@@ -112,7 +102,6 @@ modLogger.Log "MyModule", "件数: " & count
     2026/02/16 10:00:00.150 [260216-100000-SAVE] [MailSevenZip] 対象メール: Project-A Report
     2026/02/16 10:00:01.005 [260216-100000-SAVE] [MailSevenZip] 展開成功: C:\Users\User\Downloads\...
     2026/02/16 10:00:01.020 [260216-100000-SAVE] [ThisOutlookSession] === END Process ===
-
     ```
 
 ## ライセンス

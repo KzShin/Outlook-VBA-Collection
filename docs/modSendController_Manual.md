@@ -23,8 +23,6 @@
     * **休日・祝日**: 土日および設定ファイルで定義した祝日の場合、翌営業日の業務開始時刻への予約送信を提案します。
     * **予約機能**: ダイアログで「Yes」を選択すると、Outlookの「配信タイミング」機能を自動設定して送信トレイに待機させます。
 
-
-
 ## 必要要件
 
 * Windows 10 / 11
@@ -46,22 +44,15 @@
         2. `src/modSendController.bas` (本体)
 
 
-
-
 4. **ThisOutlookSessionの設定**:
     * VBAエディタ左側の `Project1` > `Microsoft Outlook Objects` > `ThisOutlookSession` をダブルクリックします。
     * 以下のコードを記述（または同梱の `src/ThisOutlookSession.cls` からコピー）します。
-
-
-        ```vb
-        Private Sub Application_ItemSend(ByVal Item As Object, Cancel As Boolean)
-            ' コントローラーへ処理を委譲
-            modSendController.Execute Item, Cancel
-        End Sub
-    
-        ```
-
-
+       ```vb
+       Private Sub Application_ItemSend(ByVal Item As Object, Cancel As Boolean)
+           ' コントローラーへ処理を委譲
+           modSendController.Execute Item, Cancel
+       End Sub    
+       ```
 
 ## 設定 (Configuration)
 
@@ -75,29 +66,24 @@
 2. **設定の編集**:
     * 以下のセクションを確認・編集します。
     * **重要**: 保存時の文字コードは必ず **UTF-8 (BOMなし推奨)** にしてください。
-
-
-        ```ini
-        [General]
-        # [共通] 7-Zipの実行ファイルパス
-        # 7-Zipがデフォルト以外の場所にインストールされている場合のみ変更してください。
-        SevenZipPath=C:\Program Files\7-Zip\7z.exe
-    
-        [SendController]
-        # [誤送信防止] 送信保留する祝日リスト (MM-DD形式, カンマ区切り)
-        # 土日に加えて、ここで指定した日付も「休日」とみなし、翌営業日送信を提案します。
-        # 例: 年末年始休暇など
-        HolidayList=12-29,12-30,12-31,01-01,01-02,01-03
-    
-        # 業務開始時間（兼 翌営業日の予約送信時刻）
-        WorkStartTime=08:00
-    
-        # 業務終了時間（この時間以降の送信は翌営業日扱いで提案）
-        WorkEndTime=18:00
-    
-        ```
-
-
+      ```ini
+      [General]
+      # [共通] 7-Zipの実行ファイルパス
+      # 7-Zipがデフォルト以外の場所にインストールされている場合のみ変更してください。
+      SevenZipPath=C:\Program Files\7-Zip\7z.exe
+      
+      [SendController]
+      # [誤送信防止] 送信保留する祝日リスト (MM-DD形式, カンマ区切り)
+      # 土日に加えて、ここで指定した日付も「休日」とみなし、翌営業日送信を提案します。
+      # 例: 年末年始休暇など
+      HolidayList=12-29,12-30,12-31,01-01,01-02,01-03
+      
+      # 業務開始時間（兼 翌営業日の予約送信時刻）
+      WorkStartTime=08:00
+      
+      # 業務終了時間（この時間以降の送信は翌営業日扱いで提案）
+      WorkEndTime=18:00    
+      ```
 
 ## 使い方
 
@@ -118,10 +104,7 @@
 * 保存先: `%APPDATA%\OutlookVBA\logs\yyyy-mm-dd.log`
 * 実行ID (`RunId`) により、一連の処理フローを追跡可能です。
 
-
-
     **ログ出力例:**
-    
     ```text
     2026/02/16 20:00:00.123 [260216-200000-SEND] [SendController] === START SendController ===
     2026/02/16 20:00:00.125 [260216-200000-SEND] [SendController] Subject=テストメール / Attachments=1
@@ -129,10 +112,7 @@
     2026/02/16 20:00:00.250 [260216-200000-SEND] [SendController] Step2 Target: ...\chk_200000_1_data.zip
     2026/02/16 20:00:00.500 [260216-200000-SEND] [SendController] Step3 Status: Night/Early. Candidate=2026/02/17 08:00:00
     2026/02/16 20:00:05.000 [260216-200000-SEND] [SendController] Step3 User Selection: Yes
-    2026/02/16 20:00:05.010 [260216-200000-SEND] [SendController] === END SendController / Cancel=False ===
-    
+    2026/02/16 20:00:05.010 [260216-200000-SEND] [SendController] === END SendController / Cancel=False ===    
     ```
-
 ## ライセンス
-
 MIT License
