@@ -32,16 +32,19 @@
 * デフォルトパス: `C:\Program Files\7-Zip\7z.exe` (設定ファイルで変更可能)
 
 
-* **共通モジュール**: `modLogger.bas` (同梱のログ出力用モジュール)
+* **共通モジュール**:
+    * `src/modConfig.bas` (同梱の共通設定モジュール)
+    * `src/modLogger.bas` (同梱のログ出力用モジュール)
 
 ## インストール
 
 1. このリポジトリのファイルをダウンロードします。
 2. Outlookを起動し、`Alt + F11` でVBAエディタを開きます。
 3. **モジュールのインポート**:
-    * `File` > `Import File` から以下の**2つのファイル**をインポートします。
-        1. `src/modLogger.bas` (必須：ログ出力用)
-        2. `src/modSendController.bas` (本体)
+    * `File` > `Import File` から以下の**3つのファイル**をインポートします。
+        1. `src/modConfig.bas` (必須：設定読み込み用)
+        2. `src/modLogger.bas` (必須：ログ出力用)
+        3. `src/modSendController.bas` (本体)
 
 
 4. **ThisOutlookSessionの設定**:

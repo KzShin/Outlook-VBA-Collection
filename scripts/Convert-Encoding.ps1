@@ -17,9 +17,21 @@ param (
     [ValidateSet("ShiftJIS", "UTF8")]
     [string]$To,
 
-    [Parameter(Mandatory=$false, HelpMessage="対象フォルダのパス (デフォルトは .\src)")]
-    [string]$TargetFolder = ".\src"
+    [Parameter(Mandatory=$false, HelpMessage="対象フォルダのパス (デフォルトはリポジトリの src フォルダ)")]
+    [string]$TargetFolder
 )
+
+# 対象フォルダの自動解決
+if ([string]::IsNullOrEmpty($TargetFolder)) {
+    $scriptRelativeSrc = Join-Path $PSScriptRoot "..\src"
+    if (Test-Path $scriptRelativeSrc) {
+        $TargetFolder = (Resolve-Path $scriptRelativeSrc).Path
+    } elseif (Test-Path ".\src") {
+        $TargetFolder = (Resolve-Path ".\src").Path
+    } else {
+        $TargetFolder = ".\src"
+    }
+}
 
 if ($From -eq $To) {
     Write-Warning "変換元と変換後が同じ文字コード（$From）です。不要な変換を防ぐため処理を終了します。"

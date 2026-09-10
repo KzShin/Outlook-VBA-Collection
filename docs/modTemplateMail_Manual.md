@@ -32,16 +32,19 @@
 ## 必要要件
 * Windows 10 / 11
 * Microsoft Outlook (Classic Desktop)
-* **共通モジュール**: `modLogger.bas` (本リポジトリに含まれる共通ログモジュール)
+* **共通モジュール**:
+    * `src/modConfig.bas` (同梱の共通設定モジュール)
+    * `src/modLogger.bas` (同梱の共通ログモジュール)
 * **専用ユーザーフォーム**: `frmSelectTemplate.frm` / `frmSelectTemplate.frx`
 ## インストール
 1. このリポジトリのファイルをダウンロードします。
 2. Outlookを起動し、`Alt + F11` でVBAエディタを開きます。
 3. **モジュールとフォームのインポート**:
     * `ファイル` > `ファイルのインポート` から以下のファイルをインポートします。
-        1. `src/modLogger.bas` (共通ログモジュール)
-        2. `src/modTemplateMail.bas` (メイン機能モジュール)
-        3. `src/frmSelectTemplate.frm` (テンプレート選択用ユーザーフォーム) ※ `.frx` も自動で読み込まれます。
+        1. `src/modConfig.bas` (必須：設定読み込み用)
+        2. `src/modLogger.bas` (必須：ログ出力用)
+        3. `src/modTemplateMail.bas` (メイン機能モジュール)
+        4. `src/frmSelectTemplate.frm` (テンプレート選択用ユーザーフォーム) ※ `.frx` も自動で読み込まれます。
 4. **ThisOutlookSessionの設定**:
 * VBAエディタ左側の `Project1` > `Microsoft Outlook Objects` > `ThisOutlookSession` をダブルクリックします。
 * 以下のプロシージャを追加します（リボンやクイックアクセスツールバーからの呼び出し用です）。

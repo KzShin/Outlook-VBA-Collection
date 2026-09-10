@@ -14,16 +14,19 @@
 
 * Windows 10 / 11
 * Microsoft Outlook (Classic Desktop)
-* **共通モジュール**: `modLogger.bas` (本リポジトリに含まれる共通ログモジュール)
+* **共通モジュール**:
+    * `src/modConfig.bas` (同梱の共通設定モジュール)
+    * `src/modLogger.bas` (同梱の共通ログモジュール)
 
 ## インストール
 
 1. このリポジトリのファイルをダウンロードします。
 2. Outlookを起動し、`Alt + F11` でVBAエディタを開きます。
 3. **モジュールのインポート**:
-    * `File` > `Import File` から以下の2つのファイルをインポートします。
-        1. `src/modLogger.bas` (共通ログモジュール)
-        2. `src/modLaunchOWA.bas` (メイン機能モジュール)
+    * `File` > `Import File` から以下の**3つのファイル**をインポートします。
+        1. `src/modConfig.bas` (必須：設定読み込み用)
+        2. `src/modLogger.bas` (必須：ログ出力用)
+        3. `src/modLaunchOWA.bas` (メイン機能モジュール)
 4. **ThisOutlookSessionの設定**:
     * VBAエディタ左側の `Project1` > `Microsoft Outlook Objects` > `ThisOutlookSession` をダブルクリックします。
     * 同梱の `src/ThisOutlookSession.cls` の中身をコピーし、貼り付けます。

@@ -62,7 +62,7 @@ Public Sub ProcessNewMail(ByVal EntryIDCollection As String)
     Dim olNs As Outlook.NameSpace
     Dim olItem As Object
     Dim EntryIDs() As String
-    Dim i As Integer
+    Dim i As Long
     
     Set olNs = Application.GetNamespace("MAPI")
     EntryIDs = Split(EntryIDCollection, ",")
@@ -77,9 +77,12 @@ Public Sub ProcessNewMail(ByVal EntryIDCollection As String)
         Set olItem = Nothing
     Next i
 
+    Set olNs = Nothing
     Log "=== END メール自動フラグ処理 (受信) ==="
     Exit Sub
 EH:
+    Set olItem = Nothing
+    Set olNs = Nothing
     Log "ERROR #" & Err.Number & " : " & Err.Description
 End Sub
 
@@ -197,75 +200,22 @@ End Sub
 
 
 ' ==============================================================================
-' [Config] 設定管理
+' [Config] 設定管理 (modConfig 連携)
 ' ==============================================================================
 
 Private Function LoadConfig(ByRef outAddress As String, _
                             ByRef outPattern As String, _
                             ByRef outExcludes As Variant) As Boolean
-    Dim fso As Object
-    Set fso = CreateObject("Scripting.FileSystemObject")
+    outAddress = modConfig.GetConfigValue("AutoFlag", "MyAddress", "")
+    outPattern = modConfig.GetConfigValue("AutoFlag", "Pattern", "")
     
-    ' 変更: 共通設定ファイルのパス
-    Dim configPath As String
-    configPath = Environ("APPDATA") & "\OutlookVBA\config.ini"
-    
-    If Not fso.FileExists(configPath) Then
-        Log "設定ファイルなし: " & configPath
-        LoadConfig = False
-        Exit Function
+    Dim excludesStr As String
+    excludesStr = modConfig.GetConfigValue("AutoFlag", "ExcludeSubjects", "")
+    If Len(excludesStr) > 0 Then
+        outExcludes = Split(excludesStr, ",")
+    Else
+        outExcludes = Array()
     End If
-    
-    outAddress = ""
-    outPattern = ""
-    outExcludes = Array()
-    
-    On Error GoTo EH
-    Dim stm As Object
-    Set stm = CreateObject("ADODB.Stream")
-    With stm
-        .Type = 2
-        .Charset = "UTF-8"
-        .Open
-        .LoadFromFile configPath
-    End With
-    
-    Dim allText As String
-    allText = stm.ReadText(-1)
-    stm.Close
-    
-    Dim lines() As String
-    lines = Split(Replace(allText, vbCrLf, vbLf), vbLf)
-    
-    Dim i As Long, lineText As String, parts() As String
-    Dim currentSection As String
-    
-    For i = LBound(lines) To UBound(lines)
-        lineText = Trim$(lines(i))
-        ' コメントと空行スキップ
-        If Len(lineText) > 0 And Left$(lineText, 1) <> "#" Then
-            
-            ' セクション判定 [SectionName]
-            If Left$(lineText, 1) = "[" And Right$(lineText, 1) = "]" Then
-                currentSection = LCase$(Mid$(lineText, 2, Len(lineText) - 2))
-            
-            ' [AutoFlag] セクションのみ処理
-            ElseIf currentSection = "autoflag" Then
-                parts = Split(lineText, "=", 2)
-                If UBound(parts) = 1 Then
-                    Select Case Trim(parts(0))
-                        Case "MyAddress"
-                            outAddress = Trim(parts(1))
-                        Case "Pattern"
-                            outPattern = Trim(parts(1))
-                        Case "ExcludeSubjects"
-                            outExcludes = Split(parts(1), ",")
-                    End Select
-                End If
-            End If
-            
-        End If
-    Next i
     
     If Len(outAddress) = 0 Then
         Log "Config Error: MyAddress未定義"
@@ -273,10 +223,6 @@ Private Function LoadConfig(ByRef outAddress As String, _
     Else
         LoadConfig = True
     End If
-    Exit Function
-EH:
-    Log "LoadConfig Error: " & Err.Description
-    LoadConfig = False
 End Function
 
 

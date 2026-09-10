@@ -13,6 +13,12 @@ Private g_RunId As String
 Private g_LogDir As String
 Private g_ArchiveDays As Integer
 Private g_7zPath As String
+Private m_FSO As Object
+
+Private Function GetFSO() As Object
+    If m_FSO Is Nothing Then Set m_FSO = CreateObject("Scripting.FileSystemObject")
+    Set GetFSO = m_FSO
+End Function
 
 ' ==============================================================================
 ' [Public] 公開インターフェース
@@ -40,55 +46,23 @@ Public Function GetSevenZipPath() As String
 End Function
 
 ' ==============================================================================
-' [Config] 設定読み込み (統合版)
+' [Config] 設定読み込み (modConfig 連携)
 ' ==============================================================================
 
 Private Sub LoadLoggerConfig()
-    Dim fso As Object: Set fso = CreateObject("Scripting.FileSystemObject")
-    Dim configPath As String
-    ' 変更: 統合設定ファイルを参照
-    configPath = Environ$("APPDATA") & "\OutlookVBA\config.ini"
-    
     ' デフォルト値
     g_LogDir = Environ$("APPDATA") & "\OutlookVBA\logs"
     g_ArchiveDays = 7
     g_7zPath = "C:\Program Files\7-Zip\7z.exe"
     
-    If fso.FileExists(configPath) Then
-        On Error Resume Next
-        Dim stm As Object: Set stm = CreateObject("ADODB.Stream")
-        With stm
-            .Type = 2: .Charset = "UTF-8": .Open: .LoadFromFile configPath
-        End With
-        Dim allText As String: allText = stm.ReadText(-1)
-        stm.Close
-        On Error GoTo 0
-        
-        Dim lines() As String: lines = Split(Replace(allText, vbCrLf, vbLf), vbLf)
-        Dim i As Long, lineText As String, parts() As String
-        Dim currentSection As String
-        
-        For i = LBound(lines) To UBound(lines)
-            lineText = Trim$(lines(i))
-            If Len(lineText) > 0 And Left$(lineText, 1) <> "#" Then
-                ' セクション判定
-                If Left$(lineText, 1) = "[" And Right$(lineText, 1) = "]" Then
-                    currentSection = LCase$(Mid$(lineText, 2, Len(lineText) - 2))
-                
-                ' [Logger] または [General] セクションを読み込む
-                ElseIf currentSection = "logger" Or currentSection = "general" Then
-                    parts = Split(lineText, "=", 2)
-                    If UBound(parts) = 1 Then
-                        Select Case Trim$(parts(0))
-                            Case "LogDir": g_LogDir = Replace(Trim$(parts(1)), "%APPDATA%", Environ$("APPDATA"))
-                            Case "ArchiveDays": g_ArchiveDays = CInt(Trim$(parts(1)))
-                            Case "SevenZipPath": g_7zPath = Trim$(parts(1))
-                        End Select
-                    End If
-                End If
-            End If
-        Next i
-    End If
+    Dim val As String
+    val = modConfig.GetConfigValue("Logger", "LogDir", g_LogDir)
+    g_LogDir = Replace(val, "%APPDATA%", Environ$("APPDATA"), 1, -1, vbTextCompare)
+    
+    val = modConfig.GetConfigValue("Logger", "ArchiveDays", "7")
+    If IsNumeric(val) Then g_ArchiveDays = CInt(val)
+    
+    g_7zPath = modConfig.GetConfigValue("General", "SevenZipPath", g_7zPath)
     
     ArchiveOldLogs
 End Sub
@@ -99,36 +73,58 @@ End Sub
 
 Private Sub AppendLogToFile(ByVal text As String)
     On Error Resume Next
-    Dim fso As Object: Set fso = CreateObject("Scripting.FileSystemObject")
+    Dim fso As Object: Set fso = GetFSO()
     If Not fso.FolderExists(g_LogDir) Then CreateFolderRecursive fso, g_LogDir
     
     Dim filePath As String: filePath = g_LogDir & "\" & Format(Now, "yyyy-mm-dd") & ".log"
+    Dim fileExists As Boolean: fileExists = fso.FileExists(filePath)
+    
+    ' 1行分の UTF-8 バイト列のみを生成
     Dim stm As Object: Set stm = CreateObject("ADODB.Stream")
     stm.Type = 2: stm.Charset = "UTF-8": stm.Open
+    stm.WriteText text & vbCrLf
     
-    If fso.FileExists(filePath) Then
-        stm.LoadFromFile filePath: stm.Position = stm.Size
+    ' 既存ファイルがある場合は BOM (3バイト) をスキップして末尾追記
+    If fileExists Then
+        stm.Position = 3
+    Else
+        stm.Position = 0
     End If
-    stm.WriteText text & vbCrLf: stm.SaveToFile filePath, 2: stm.Close
+    stm.Type = 1 ' adTypeBinary
+    
+    Dim utf8Bytes() As Byte
+    utf8Bytes = stm.Read
+    stm.Close: Set stm = Nothing
+    
+    ' ネイティブバイナリモードでファイル末尾に直接追記 (O(1)、全ファイル再読み込みなし)
+    Dim fn As Integer: fn = FreeFile
+    Open filePath For Binary Access Write As #fn
+    Seek #fn, LOF(fn) + 1
+    Put #fn, , utf8Bytes
+    Close #fn
     On Error GoTo 0
 End Sub
 
 Private Sub ArchiveOldLogs()
     On Error Resume Next
-    Dim fso As Object: Set fso = CreateObject("Scripting.FileSystemObject")
+    Dim fso As Object: Set fso = GetFSO()
     If Dir$(g_7zPath) = "" Or Not fso.FolderExists(g_LogDir) Then Exit Sub
     
     Dim f As Object, targetDate As Date
     targetDate = DateAdd("d", -g_ArchiveDays, Date)
     
+    Dim sh As Object: Set sh = Nothing
+    
     For Each f In fso.GetFolder(g_LogDir).Files
         If LCase$(fso.GetExtensionName(f.Name)) = "log" And f.DateLastModified < targetDate Then
             Dim zipPath As String: zipPath = f.Path & ".zip"
             If Not fso.FileExists(zipPath) Then
-                CreateObject("WScript.Shell").Run """" & g_7zPath & """ a """ & zipPath & """ """ & f.Path & """ -sdel", 0, True
+                If sh Is Nothing Then Set sh = CreateObject("WScript.Shell")
+                sh.Run """" & g_7zPath & """ a """ & zipPath & """ """ & f.Path & """ -sdel", 0, True
             End If
         End If
     Next f
+    Set sh = Nothing
     On Error GoTo 0
 End Sub
 

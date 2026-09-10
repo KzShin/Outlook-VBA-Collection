@@ -20,7 +20,7 @@ GitHub等での公開および複数環境での配布を前提とし、以下�
 
 4. **Self-Contained Logic（自己完結性）**:
     * 標準モジュール単体で機能が完結するように設計し、外部依存（他モジュールへの依存）を最小限にする。
-    * **例外**: ログ出力に関しては、共通モジュール `modLogger` への依存を許容・推奨する。
+    * **例外**: ログ出力に関しては共通モジュール `modLogger`、設定読み込みに関しては共通モジュール `modConfig` への依存を許容・推奨する。
 
 
 ## 2. モジュール構成 (Module Structure)
@@ -119,9 +119,11 @@ Public Sub MainProcess(ByVal Item As Object)
     Log "=== START 処理名 ==="
     ' ... 処理本体 ...
     Log "=== END 処理名 ==="
+    modLogger.SetRunId "NoID"
     Exit Sub
 EH:
     Log "ERROR #" & Err.Number & " : " & Err.Description
+    modLogger.SetRunId "NoID"
 End Sub
 ```
 
@@ -139,52 +141,27 @@ End Sub
 * **パス**: `%APPDATA%\OutlookVBA\config.ini`
 * **形式**: INI形式。セクション `[SectionName]` で区切る。
 * **文字コード**: **UTF-8**。
-* **コメント**: 行頭が `#` の行はコメントとして扱い、読み込み時に無視する仕様とする。
+* **コメント**: 行頭が `#`、`;`、`//` の行はコメントとして扱い、読み込み時に無視する仕様とする。
 
-### 5.2. 読み込みの実装
+### 5.2. 読み込みの実装（modConfig の利用）
 
-`ADODB.Stream` を使用してUTF-8で読み込み、**「現在のセクション」を判定して自モジュールの設定のみを取得する** ロジックを実装する。
+各モジュールで個別に `ADODB.Stream` や `FileSystemObject` を開いてパースすることは**原則禁止**とし、共通設定モジュール `modConfig` を利用する。  
+`modConfig` はセクション単位でメモリキャッシュ（Dictionary）を保持するため、高速かつ安全に設定値を取得できる。
 
-**推奨読み込みコード（セクション対応版）:**
+**推奨読み込みコード:**
 
 ```vb
-Dim stm As Object
-Set stm = CreateObject("ADODB.Stream")
-' UTF-8で全読み込み
-With stm
-    .Type = 2          ' adTypeText
-    .Charset = "UTF-8"
-    .Open
-    .LoadFromFile configPath
-End With
-Dim allText As String
-allText = stm.ReadText(-1)
-stm.Close
+' 単一キーの値を取得（第3引数はデフォルト値）
+Dim mySetting As String
+mySetting = modConfig.GetConfigValue("MySection", "MyKey", "DefaultValue")
 
-' 行ごとに処理
-Dim lines() As String
-Dim i As Long, lineText As String
-Dim currentSection As String ' 現在のセクションを保持
+' セクション全体のDictionaryを取得して走査
+Dim secDict As Object, k As Variant
+Set secDict = modConfig.GetSection("MySection")
 
-lines = Split(Replace(allText, vbCrLf, vbLf), vbLf)
-
-For i = LBound(lines) To UBound(lines)
-    lineText = Trim$(lines(i))
-    
-    ' 空行とコメント(#)をスキップ
-    If Len(lineText) > 0 And Left$(lineText, 1) <> "#" Then
-        
-        ' セクション開始の判定 [SectionName]
-        If Left$(lineText, 1) = "[" And Right$(lineText, 1) = "]" Then
-            currentSection = LCase$(Mid$(lineText, 2, Len(lineText) - 2))
-        
-        ' 対象セクション（例: myfeature）の場合のみ読み込み
-        ElseIf currentSection = "myfeature" Then
-            ' Key=Value 解析
-            ' ...
-        End If
-    End If
-Next i
+For Each k In secDict.Keys
+    Debug.Print k & " = " & secDict(k)
+Next k
 ```
 
 

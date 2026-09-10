@@ -178,55 +178,17 @@ Private Sub ReplaceDatePlaceholders(ByRef mail As Outlook.MailItem)
 End Sub
 
 ' ==============================================================================
-' [Config] 設定管理・フォルダ操作
+' [Config] 設定管理・フォルダ操作 (modConfig 連携)
 ' ==============================================================================
 
 Private Function GetTemplateFolderPath() As String
-    Dim fso As Object: Set fso = CreateObject("Scripting.FileSystemObject")
-    Dim configPath As String
-    configPath = Environ$("APPDATA") & "\OutlookVBA\config.ini"
-    
-    ' デフォルトパス
     Dim defaultPath As String
     defaultPath = Environ$("APPDATA") & "\OutlookVBA\Templates"
     
-    If Not fso.FileExists(configPath) Then
-        GetTemplateFolderPath = defaultPath
-        Exit Function
-    End If
-    
-    ' UTF-8 読み込み
-    Dim stm As Object: Set stm = CreateObject("ADODB.Stream")
-    stm.Type = 2: stm.Charset = "UTF-8": stm.Open
-    stm.LoadFromFile configPath
-    Dim allText As String: allText = stm.ReadText(-1)
-    stm.Close
-    
-    Dim lines() As String: lines = Split(Replace(allText, vbCrLf, vbLf), vbLf)
-    Dim i As Long, lineText As String, currentSection As String, parts() As String
-    
-    For i = LBound(lines) To UBound(lines)
-        lineText = Trim$(lines(i))
-        If Len(lineText) > 0 And Left$(lineText, 1) <> "#" Then
-            If Left$(lineText, 1) = "[" And Right$(lineText, 1) = "]" Then
-                currentSection = LCase$(Mid$(lineText, 2, Len(lineText) - 2))
-            ElseIf currentSection = "templatemail" Then
-                parts = Split(lineText, "=", 2)
-                If UBound(parts) = 1 Then
-                    If Trim$(LCase$(parts(0))) = "templatefolder" Then
-                        Dim val As String
-                        val = Trim$(parts(1))
-                        ' %APPDATA% の環境変数を展開
-                        val = Replace(val, "%APPDATA%", Environ$("APPDATA"), 1, -1, vbTextCompare)
-                        GetTemplateFolderPath = val
-                        Exit Function
-                    End If
-                End If
-            End If
-        End If
-    Next i
-    
-    GetTemplateFolderPath = defaultPath
+    Dim val As String
+    val = modConfig.GetConfigValue("TemplateMail", "TemplateFolder", defaultPath)
+    val = Replace(val, "%APPDATA%", Environ$("APPDATA"), 1, -1, vbTextCompare)
+    GetTemplateFolderPath = val
 End Function
 
 Private Sub CreateFolderRecursive(ByVal fso As Object, ByVal path As String)

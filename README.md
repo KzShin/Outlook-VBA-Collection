@@ -17,10 +17,21 @@
 | **modForwardDraft** | **転送メール下書き作成**。<br>選択したメールをテキスト形式に変換し、事前に設定した宛先と定型文を挿入した転送用下書きをワンクリックで作成します。 |
 | **modTemplateMail** | **テンプレートメール作成**。<br>テンプレート一覧から選択し、日付・曜日・和暦（令和）の変数を自動置換して新規テキスト形式メールを作成します。 |
 | **modLogger** | **共通ログ管理**。<br>全モジュールの動作ログを記録・管理します。自動アーカイブ機能付き。 |
+| **modConfig** | **共通設定管理**。<br>全モジュールの設定ファイル (`config.ini`) 読み込み・キャッシュを一元管理します。 |
+
+### ユーティリティ・管理スクリプト (PowerShell)
+| スクリプト名 | 機能概要 |
+| --- | --- |
+| **Protect-SevenZipPassword.ps1** | **7-Zipパスワード暗号化管理**。<br>平文パスワードや `SevenZipPasswords.txt` を Windows DPAPI で暗号化し、`SevenZipPasswords.enc` に安全に保存します。標準ユーザーで実行可能です。 |
+| **Unprotect-SevenZipPassword.ps1** | **暗号化パスワード復号・確認**。<br>暗号化されたパスワード一覧をマスク形式または平文で表示・確認します。 |
+| **Convert-Encoding.ps1** | **VBA文字コード変換**。<br>ソースコードの Shift-JIS と UTF-8 (BOMなし) を相互変換します。 |
+
 ## 必要要件
 * Windows 10 / 11
 * Microsoft Outlook (Classic Desktop)
 * [7-Zip](https://7-zip.opensource.jp/) (modSendController, modMailSevenZip で使用)
+* Windows PowerShell 5.1 / PowerShell 7 (暗号化パスワード管理・文字コード変換で使用)
+
 ## インストール方法
 
 ### ⚠️ 0. 文字コードの変換 (重要)
@@ -30,29 +41,36 @@ Outlookへインポートする前に、必ず同梱の変換スクリプトを�
 
 **変換手順 (PowerShell):**
 ```powershell
-.\Convert-Encoding.ps1 -From UTF8 -To ShiftJIS
+.\scripts\Convert-Encoding.ps1 -From UTF8 -To ShiftJIS
 ```
 
 ### 1. **ソースコードのインポート**
    * Outlookで `Alt + F11` を押して VBA エディタを開きます。
    * `src/` フォルダ内の `.bas` ファイルをすべてインポートします。
-   * **必須**: `modLogger.bas`
-   * **選択**: 使用したい機能のモジュール（例: `modSendController.bas`）
-### 2. **設定ファイルの配置**
+   * **必須**: `modConfig.bas`, `modLogger.bas`
+   * **選択**: 使用したい機能のモジュール（例: `modSendController.bas`, `modMailSevenZip.bas`）
+
+### 2. **設定ファイル・パスワードの配置**
    * エクスプローラーで `%APPDATA%` を開き、`OutlookVBA` という名前のフォルダを作成します。
    * パス例: `C:\Users\ユーザー名\AppData\Roaming\OutlookVBA\`
    * `configs/` フォルダ内のサンプルファイルを参考に、以下のファイルを作成・配置してください（文字コードは **UTF-8**）。
 
-        | ファイル名 | 用途 | 元ファイル(参考) |
+        | ファイル名 | 用途 | 登録方法 |
         | --- | --- | --- |
-        | **config.ini** | 全ツールの統合設定 | `configs/config.sample.ini` |
-        | **SevenZipPasswords.txt** | 7-Zip解凍用パスワードリスト | `configs/SevenZipPasswords.sample.txt` |
+        | **config.ini** | 全ツールの統合設定 | `configs/config.sample.ini` をコピーして編集 |
+        | **SevenZipPasswords.enc** | 7-Zip解凍用暗号化パスワード（**推奨**） | `.\scripts\Protect-SevenZipPassword.ps1` で暗号化保存 |
+        | **SevenZipPasswords.txt** | 7-Zip解凍用平文パスワード（下位互換） | `configs/SevenZipPasswords.sample.txt` をコピーして配置 |
 
 ### 3. **マクロの有効化**
    * `src/ThisOutlookSession.cls` の内容を参考に、Outlookの `ThisOutlookSession` モジュールにコードを記述します。
    * これにより、メール受信時や送信時に自動的にツールが実行されるようになります。
+
 ## ディレクトリ構成
 * `src/`: VBAソースコード
+* `scripts/`: PowerShell 管理・ユーティリティスクリプト
+  * `Convert-Encoding.ps1`: ソースコード文字コード変換ツール
+  * `Protect-SevenZipPassword.ps1`: パスワード暗号化登録ツール
+  * `Unprotect-SevenZipPassword.ps1`: パスワード復号確認ツール
 * `configs/`: 設定ファイルのサンプル (ini, txt)
 * `docs/`: 詳細ドキュメントとコーディング規約
 ## ライセンス

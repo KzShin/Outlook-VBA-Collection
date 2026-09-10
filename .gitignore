@@ -1,6 +1,7 @@
 # 本物の設定ファイル（秘密情報を含むため無視する）
 config.ini
 SevenZipPasswords.txt
+PowerShellCodingRules.md
 
 # ログファイル等があればそれも無視
 *.log

@@ -6,9 +6,19 @@ Option Explicit
 ' Description: メール添付ファイルを保存し、必要に応じて7-Zipで解凍・結合を行う統合モジュール
 '              - 単一メール選択時: 通常の添付ファイル保存とZip/7z解凍
 '              - 複数メール選択時: 分割Zip(.001など)の保存、結合、解凍
-' Dependencies: modLogger, Scripting.FileSystemObject, ADODB.Stream, WScript.Shell
-' Configuration: %APPDATA%\OutlookVBA\SevenZipPasswords.txt (解凍パスワードリスト)
+' Dependencies: modLogger, Scripting.FileSystemObject, ADODB.Stream, WScript.Shell, MSXML2.DOMDocument
+' Configuration: %APPDATA%\OutlookVBA\SevenZipPasswords.enc (暗号化パスワードリスト・推奨)
+'                %APPDATA%\OutlookVBA\SevenZipPasswords.txt (平文パスワードリスト・下位互換用)
 ' ==============================================================================
+
+Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal dwMilliseconds As Long)
+
+Private m_FSO As Object
+
+Private Function GetFSO() As Object
+    If m_FSO Is Nothing Then Set m_FSO = CreateObject("Scripting.FileSystemObject")
+    Set GetFSO = m_FSO
+End Function
 
 ' ==============================================================================
 ' [Private] ログ出力ヘルパー（modLoggerへの委譲）
@@ -99,8 +109,11 @@ Private Sub ProcessSingleMail(ByVal objItem As Object, ByVal fso As Object)
 
     ' 添付ファイルの保存と解凍
     Dim att As Outlook.Attachment
+    Dim savePath As String
+    Dim outDir As String
+    Dim cancelled As Boolean
+
     For Each att In mail.Attachments
-        Dim savePath As String
         savePath = MakeUniqueFilePath(fso, fso.BuildPath(rootPath, att.FileName))
 
         Log "添付保存開始：" & att.FileName
@@ -108,11 +121,10 @@ Private Sub ProcessSingleMail(ByVal objItem As Object, ByVal fso As Object)
 
         ' アーカイブ処理
         If has7zip And IsArchiveTarget(att.FileName) Then
-            Dim outDir As String
             outDir = MakeUniqueFolderPath(fso, fso.BuildPath(rootPath, SafeName(fso.GetBaseName(att.FileName))))
             fso.CreateFolder outDir
 
-            Dim cancelled As Boolean
+            cancelled = False
             If TestThenExtractArchive(savePath, outDir, sevenZipPath, mail.ReceivedTime, 120, cancelled) Then
                 Log "展開成功：" & outDir
             Else
@@ -314,11 +326,22 @@ Private Function SevenZipTest(ByVal zipPath As String, ByVal sevenZipPath As Str
     Dim sh As Object: Set sh = CreateObject("WScript.Shell")
     Dim baseCmd As String
     baseCmd = """" & sevenZipPath & """ t -y """ & zipPath & """ -bso0 -bse0 -bsp0"
+    ' 空パスワードであっても常に -p を付与し、対話型プロンプト待ちを防止する
     Dim cmd As String: cmd = baseCmd & " -p""" & password & """"
-    Log "7zテスト：" & baseCmd & " -p""" & MaskPassword(password) & """"
+    
+    If Len(password) > 0 Then
+        Log "7zテスト：" & baseCmd & " -p""" & MaskPassword(password) & """"
+    Else
+        Log "7zテスト：" & baseCmd & " -p"""""
+    End If
 
     Dim proc As Object: Set proc = sh.Exec(cmd)
+    On Error Resume Next
+    proc.StdIn.Close ' 万が一の対話待ちを二重防止
+    On Error GoTo 0
     SevenZipTest = WaitProcessWithTimeout(proc, timeoutSec)
+    Set proc = Nothing
+    Set sh = Nothing
 End Function
 
 Private Function SevenZipExtract(ByVal zipPath As String, ByVal outDir As String, _
@@ -327,12 +350,22 @@ Private Function SevenZipExtract(ByVal zipPath As String, ByVal outDir As String
     Dim sh As Object: Set sh = CreateObject("WScript.Shell")
     Dim baseCmd As String
     baseCmd = """" & sevenZipPath & """ x -y """ & zipPath & """ -o""" & outDir & """ -bso0 -bse0 -bsp0"
-    Dim cmd As String: cmd = baseCmd
-    If Len(password) > 0 Then cmd = cmd & " -p""" & password & """"
-    Log "7z抽出：" & baseCmd & " -p""" & MaskPassword(password) & """"
+    ' 空パスワードであっても常に -p を付与し、対話型プロンプト待ちを防止する
+    Dim cmd As String: cmd = baseCmd & " -p""" & password & """"
+    
+    If Len(password) > 0 Then
+        Log "7z抽出：" & baseCmd & " -p""" & MaskPassword(password) & """"
+    Else
+        Log "7z抽出：" & baseCmd & " -p"""""
+    End If
 
     Dim proc As Object: Set proc = sh.Exec(cmd)
+    On Error Resume Next
+    proc.StdIn.Close ' 万が一の対話待ちを二重防止
+    On Error GoTo 0
     SevenZipExtract = WaitProcessWithTimeout(proc, timeoutSec)
+    Set proc = Nothing
+    Set sh = Nothing
 End Function
 
 
@@ -343,19 +376,105 @@ End Function
 Private Function GetPasswordCandidates(ByVal receivedTime As Date) As Collection
     Dim col As New Collection
     Dim folderPath As String: folderPath = Environ$("APPDATA") & "\OutlookVBA"
-    Dim listPath As String: listPath = folderPath & "\SevenZipPasswords.txt"
+    Dim encPath As String: encPath = folderPath & "\SevenZipPasswords.enc"
+    Dim txtPath As String: txtPath = folderPath & "\SevenZipPasswords.txt"
 
     On Error Resume Next
     Dim fso As Object: Set fso = CreateObject("Scripting.FileSystemObject")
     If Not fso.FolderExists(folderPath) Then fso.CreateFolder folderPath
     On Error GoTo 0
 
-    If LoadPasswordsFromFile(listPath, receivedTime, col) Then
-        Log "PW候補読込完了: " & col.Count & "件"
+    ' 1. 暗号化ファイル (.enc) が存在する場合は最優先で復号して読み込み
+    If fso.FileExists(encPath) Then
+        If LoadPasswordsFromEncryptedFile(encPath, receivedTime, col) Then
+            Log "PW候補読込完了(暗号化): " & col.Count & "件"
+            Set GetPasswordCandidates = col
+            Set fso = Nothing
+            Exit Function
+        Else
+            Log "PW候補読込警告: 暗号化ファイルの復号に失敗しました。平文ファイルの確認へ進みます。"
+        End If
     End If
+
+    ' 2. 平文ファイル (.txt) の下位互換フォールバック
+    If fso.FileExists(txtPath) Then
+        If LoadPasswordsFromFile(txtPath, receivedTime, col) Then
+            Log "PW候補読込注意: 平文ファイルを使用しています。Protect-SevenZipPassword.ps1 による暗号化を推奨します (" & col.Count & "件)"
+            Set GetPasswordCandidates = col
+            Set fso = Nothing
+            Exit Function
+        End If
+    End If
+
+    Set fso = Nothing
     Set GetPasswordCandidates = col
 End Function
 
+' 暗号化ファイル (.enc) を PowerShell (DPAPI / SecureString) で復号して読み込み
+Private Function LoadPasswordsFromEncryptedFile(ByVal filePath As String, ByVal receivedTime As Date, ByRef outCol As Collection) As Boolean
+    On Error GoTo EH
+    Dim fso As Object: Set fso = CreateObject("Scripting.FileSystemObject")
+    If Not fso.FileExists(filePath) Then Exit Function
+    Set fso = Nothing
+
+    Dim yyyy As String: yyyy = Format(receivedTime, "yyyy")
+    Dim yy As String: yy = Right$(yyyy, 2)
+    Dim mm As String: mm = Format(receivedTime, "mm")
+    Dim dd As String: dd = Format(receivedTime, "dd")
+
+    Dim wsh As Object: Set wsh = CreateObject("WScript.Shell")
+    Dim psScript As String
+    psScript = "Import-Module $PSHOME\Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1 -ErrorAction SilentlyContinue; " & _
+               "& { param($p) if (Test-Path -LiteralPath $p) { " & _
+               "Get-Content -LiteralPath $p | ForEach-Object { " & _
+               "$l = $_.Trim(); if ($l.Length -gt 0) { " & _
+               "try { $s = ConvertTo-SecureString $l; $b = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($s); " & _
+               "try { [Console]::WriteLine([System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes([System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($b)))) } " & _
+               "finally { [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($b) } " & _
+               "} catch {} } } } } '" & filePath & "'"
+
+    Dim fullCmd As String
+    fullCmd = "powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command """ & psScript & """"
+
+    Dim oExec As Object: Set oExec = wsh.Exec(fullCmd)
+    Do While oExec.Status = 0
+        DoEvents
+    Loop
+
+    Dim outText As String
+    outText = oExec.StdOut.ReadAll()
+    Set oExec = Nothing
+    Set wsh = Nothing
+
+    If Len(Trim$(outText)) = 0 Then
+        LoadPasswordsFromEncryptedFile = False
+        Exit Function
+    End If
+
+    Dim lines() As String
+    lines = Split(Replace(outText, vbCrLf, vbLf), vbLf)
+
+    Dim i As Long, b64Line As String, plain As String, cnt As Long
+    For i = LBound(lines) To UBound(lines)
+        b64Line = Trim$(lines(i))
+        If Len(b64Line) > 0 Then
+            plain = DecodeBase64Utf8(b64Line)
+            If Len(plain) > 0 Then
+                plain = ExpandPasswordTemplate(plain, yyyy, yy, mm, dd)
+                outCol.Add plain
+                cnt = cnt + 1
+            End If
+        End If
+    Next i
+
+    LoadPasswordsFromEncryptedFile = (cnt > 0)
+    Exit Function
+
+EH:
+    LoadPasswordsFromEncryptedFile = False
+End Function
+
+' 平文テキストファイル (.txt) の読み込み（下位互換用）
 Private Function LoadPasswordsFromFile(ByVal filePath As String, ByVal receivedTime As Date, ByRef outCol As Collection) As Boolean
     On Error GoTo EH
     Dim fso As Object: Set fso = CreateObject("Scripting.FileSystemObject")
@@ -390,10 +509,7 @@ Private Function LoadPasswordsFromFile(ByVal filePath As String, ByVal receivedT
             End If
 
             If isTarget Then
-                expanded = Replace(expanded, "{yyyy}", yyyy)
-                expanded = Replace(expanded, "{yy}", yy)
-                expanded = Replace(expanded, "{mm}", mm)
-                expanded = Replace(expanded, "{dd}", dd)
+                expanded = ExpandPasswordTemplate(expanded, yyyy, yy, mm, dd)
                 outCol.Add expanded
                 cnt = cnt + 1
             End If
@@ -405,25 +521,55 @@ EH:
     LoadPasswordsFromFile = False
 End Function
 
+' パスワード文字列の日付プレースホルダーを展開
+Private Function ExpandPasswordTemplate(ByVal rawPw As String, ByVal yyyy As String, ByVal yy As String, ByVal mm As String, ByVal dd As String) As String
+    Dim res As String: res = rawPw
+    res = Replace(res, "{yyyy}", yyyy)
+    res = Replace(res, "{yy}", yy)
+    res = Replace(res, "{mm}", mm)
+    res = Replace(res, "{dd}", dd)
+    ExpandPasswordTemplate = res
+End Function
+
+' Base64文字列 (UTF-8) を平文文字列にデコード
+Private Function DecodeBase64Utf8(ByVal b64Text As String) As String
+    On Error GoTo EH
+    Dim xmlDoc As Object: Set xmlDoc = CreateObject("MSXML2.DOMDocument")
+    Dim el As Object: Set el = xmlDoc.createElement("b64")
+    el.DataType = "bin.base64"
+    el.Text = b64Text
+
+    Dim stm As Object: Set stm = CreateObject("ADODB.Stream")
+    stm.Type = 1 ' adTypeBinary
+    stm.Open
+    stm.Write el.nodeTypedValue
+    stm.Position = 0
+    stm.Type = 2 ' adTypeText
+    stm.Charset = "UTF-8"
+    DecodeBase64Utf8 = stm.ReadText(-1)
+    stm.Close
+    Set stm = Nothing
+    Set el = Nothing
+    Set xmlDoc = Nothing
+    Exit Function
+EH:
+    DecodeBase64Utf8 = ""
+End Function
+
 
 ' ==============================================================================
 ' [System] プロセス制御ユーティリティ
 ' ==============================================================================
 
 Private Function WaitProcessWithTimeout(ByVal proc As Object, ByVal timeoutSeconds As Long) As Long
-    Dim startTick As Single: startTick = Timer
-    Do
-        Do While Not proc.StdOut.AtEndOfStream
-            proc.StdOut.Read 1024
-        Loop
-        Do While Not proc.StdErr.AtEndOfStream
-            proc.StdErr.Read 1024
-        Loop
-
-        If Not IsProcessRunning(proc) Then Exit Do
-
+    Dim startTick As Double: startTick = Timer
+    
+    ' WshExecのStdOut.AtEndOfStreamはプロセス待機中に同期ブロックするため、
+    ' proc.Status（0: 実行中, 1: 終了）で安全にポーリング待機を行う
+    Do While proc.Status = 0
         If ElapsedSeconds(startTick) >= timeoutSeconds Then
             On Error Resume Next
+            proc.Terminate
             TerminateProcessByPID proc.ProcessID
             On Error GoTo 0
             WaitProcessWithTimeout = 255
@@ -431,6 +577,7 @@ Private Function WaitProcessWithTimeout(ByVal proc As Object, ByVal timeoutSecon
         End If
         PauseSeconds 0.05
     Loop
+    
     WaitProcessWithTimeout = proc.ExitCode
 End Function
 
@@ -447,10 +594,12 @@ Private Sub TerminateProcessByPID(ByVal pid As Long)
     Dim svc As Object: Set svc = GetObject("winmgmts:{impersonationLevel=impersonate}!\\.\root\cimv2")
     Dim obj As Object: Set obj = svc.Get("Win32_Process.Handle='" & pid & "'")
     If Not obj Is Nothing Then obj.Terminate
+    Set obj = Nothing
+    Set svc = Nothing
     On Error GoTo 0
 End Sub
 
-Private Function ElapsedSeconds(ByVal startTick As Single) As Double
+Private Function ElapsedSeconds(ByVal startTick As Double) As Double
     Dim t As Double: t = Timer
     If t >= startTick Then ElapsedSeconds = t - startTick Else ElapsedSeconds = (86400# - startTick) + t
 End Function
@@ -458,6 +607,7 @@ End Function
 Private Sub PauseSeconds(ByVal seconds As Double)
     Dim st As Double: st = Timer
     Do While ElapsedSeconds(st) < seconds
+        Sleep 50
         DoEvents
     Loop
 End Sub
@@ -468,16 +618,18 @@ End Sub
 ' ==============================================================================
 
 Private Function MaskPassword(ByVal pw As String) As String
-    Dim res As String, i As Long
-    For i = 1 To Len(pw)
-        If i Mod 2 = 1 Then res = res & Mid$(pw, i, 1) Else res = res & "*"
-    Next i
-    MaskPassword = res
+    Dim n As Long: n = Len(pw)
+    If n = 0 Then Exit Function
+    If n <= 2 Then
+        MaskPassword = String(n, "*")
+    Else
+        MaskPassword = Left$(pw, 1) & String(n - 1, "*")
+    End If
 End Function
 
 Private Function HasNonZeroFileDeep(ByVal folderPath As String) As Boolean
     On Error Resume Next
-    Dim fso As Object: Set fso = CreateObject("Scripting.FileSystemObject")
+    Dim fso As Object: Set fso = GetFSO()
     If Not fso.FolderExists(folderPath) Then Exit Function
     Dim fld As Object: Set fld = fso.GetFolder(folderPath)
 
@@ -488,7 +640,7 @@ Private Function HasNonZeroFileDeep(ByVal folderPath As String) As Boolean
 
     Dim subf As Object
     For Each subf In fld.SubFolders
-        If HasNonZeroFileDeep(subf.path) Then HasNonZeroFileDeep = True: Exit Function
+        If HasNonZeroFileDeep(subf.Path) Then HasNonZeroFileDeep = True: Exit Function
     Next subf
     On Error GoTo 0
 End Function
@@ -506,6 +658,7 @@ Private Function SafeName(ByVal s As String) As String
     r = Replace(r, "<", "_"): r = Replace(r, ">", "_"): r = Replace(r, ":", "_")
     r = Replace(r, """", "_"): r = Replace(r, "/", "_"): r = Replace(r, "\", "_")
     r = Replace(r, "|", "_"): r = Replace(r, "?", "_"): r = Replace(r, "*", "_")
+    r = Replace(r, "%", "_"): r = Replace(r, "&", "_"): r = Replace(r, "^", "_")
     r = Replace(r, vbCr, "_"): r = Replace(r, vbLf, "_"): r = Replace(r, vbTab, "_")
     If Len(r) > 150 Then r = Left$(r, 150)
     SafeName = Trim$(r)
@@ -548,4 +701,5 @@ Private Sub WriteTextUtf8(ByVal path As String, ByVal text As String)
     stm.WriteText text
     stm.SaveToFile path, 2
     stm.Close
+    Set stm = Nothing
 End Sub

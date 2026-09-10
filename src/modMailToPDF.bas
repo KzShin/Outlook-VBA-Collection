@@ -10,8 +10,6 @@ Option Explicit
 
 ' --- グローバル変数 (Module Level) ---
 Private g_RunId As String
-Private g_ConfigCache As Object
-Private g_IsConfigLoaded As Boolean
 
 ' ==============================================================================
 ' [Public] 公開インターフェース・初期化
@@ -144,78 +142,18 @@ End Sub
 
 
 ' ==============================================================================
-' [Config] 設定読み込み
+' [Config] 設定読み込み (modConfig 連携)
 ' ==============================================================================
 
-Private Sub LoadConfig()
-    On Error GoTo EH
-    Set g_ConfigCache = CreateObject("Scripting.Dictionary")
-    
-    Dim fso As Object: Set fso = CreateObject("Scripting.FileSystemObject")
-    Dim configPath As String
-    configPath = Environ$("APPDATA") & "\OutlookVBA\config.ini"
-    
-    If Not fso.FileExists(configPath) Then
-        Log "Config file not found: " & configPath
-        g_IsConfigLoaded = True
-        Exit Sub
-    End If
-    
-    ' ADODB.StreamによるUTF-8読み込み
-    Dim stm As Object: Set stm = CreateObject("ADODB.Stream")
-    With stm
-        .Type = 2
-        .Charset = "UTF-8"
-        .Open
-        .LoadFromFile configPath
-    End With
-    
-    Dim allText As String: allText = stm.ReadText(-1)
-    stm.Close
-    
-    ' 解析処理（セクション対応）
-    Dim lines() As String: lines = Split(Replace(allText, vbCrLf, vbLf), vbLf)
-    Dim i As Long, lineText As String, eqPos As Long
-    Dim key As String, val As String
-    Dim currentSection As String
-    
-    For i = LBound(lines) To UBound(lines)
-        lineText = Trim$(lines(i))
-        ' コメント(#)と空行をスキップ
-        If Len(lineText) > 0 And Left$(lineText, 1) <> "#" Then
-            
-            ' セクション判定
-            If Left$(lineText, 1) = "[" And Right$(lineText, 1) = "]" Then
-                currentSection = LCase$(Mid$(lineText, 2, Len(lineText) - 2))
-            
-            ' [MailToPDF] セクションのみ読み込む
-            ElseIf currentSection = "mailtopdf" Then
-                eqPos = InStr(lineText, "=")
-                If eqPos > 1 Then
-                    key = Trim$(Left$(lineText, eqPos - 1))
-                    val = Trim$(Mid$(lineText, eqPos + 1))
-                    g_ConfigCache(key) = val
-                End If
-            End If
-            
-        End If
-    Next i
-    
-    g_IsConfigLoaded = True
-    Log "Config Loaded Successfully."
-    Exit Sub
-EH:
-    Log "Config Load Error: " & Err.Description
-    g_IsConfigLoaded = True
-End Sub
-
 Private Function GetConfigValue(ByVal key As String, Optional ByVal defaultVal As String = "") As String
-    If Not g_IsConfigLoaded Then LoadConfig
-    
-    If g_ConfigCache.Exists(key) Then
-        GetConfigValue = g_ConfigCache(key)
+    Dim val As String
+    val = modConfig.GetConfigValue("MailToPDF", key, "")
+    If Len(val) > 0 Then
+        GetConfigValue = val
     Else
-        Log "Config Key Not Found: [" & key & "] -> Using Default: " & defaultVal
+        If Len(defaultVal) > 0 Then
+            Log "Config Key Not Found: [" & key & "] -> Using Default: " & defaultVal
+        End If
         GetConfigValue = defaultVal
     End If
 End Function

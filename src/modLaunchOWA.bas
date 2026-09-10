@@ -82,74 +82,11 @@ Private Sub OpenOutlookWeb()
 End Sub
 
 ' ==============================================================================
-' [Config] 設定管理
+' [Config] 設定管理 (modConfig 連携)
 ' ==============================================================================
 
 Private Function GetConfigValue(ByVal targetKey As String) As String
-    Dim fso As Object
-    Set fso = CreateObject("Scripting.FileSystemObject")
-    
-    Dim configPath As String
-    ' 変更: 共通設定ファイルのパス
-    configPath = Environ("APPDATA") & "\OutlookVBA\config.ini"
-    
-    If Not fso.FileExists(configPath) Then
-        Log "Config file missing: " & configPath
-        Exit Function
-    End If
-    
-    ' ADODB.StreamによるUTF-8読み込み
-    On Error Resume Next
-    Dim stm As Object
-    Set stm = CreateObject("ADODB.Stream")
-    
-    With stm
-        .Type = 2          ' adTypeText
-        .Charset = "UTF-8"
-        .Open
-        .LoadFromFile configPath
-    End With
-    
-    Dim allText As String
-    allText = stm.ReadText(-1)
-    stm.Close
-    On Error GoTo 0
-    
-    ' 行ごとの解析
-    Dim lines() As String
-    lines = Split(Replace(allText, vbCrLf, vbLf), vbLf)
-    
-    Dim i As Long, lineText As String
-    Dim separatorPos As Long
-    Dim currentSection As String
-    Dim key As String, value As String
-    
-    For i = LBound(lines) To UBound(lines)
-        lineText = Trim$(lines(i))
-        
-        ' コメント(#)と空行スキップ
-        If Len(lineText) > 0 And Left$(lineText, 1) <> "#" Then
-            
-            ' セクション判定 [SectionName]
-            If Left$(lineText, 1) = "[" And Right$(lineText, 1) = "]" Then
-                currentSection = LCase$(Mid$(lineText, 2, Len(lineText) - 2))
-                
-            ' [LaunchOWA] セクションのみ処理
-            ElseIf currentSection = "launchowa" Then
-                separatorPos = InStr(lineText, "=")
-                
-                If separatorPos > 0 Then
-                    key = Trim$(Left$(lineText, separatorPos - 1))
-                    value = Trim$(Mid$(lineText, separatorPos + 1))
-                    
-                    If LCase$(key) = LCase$(targetKey) Then
-                        GetConfigValue = value
-                        Exit Function
-                    End If
-                End If
-            End If
-        End If
-    Next i
+    GetConfigValue = modConfig.GetConfigValue("LaunchOWA", targetKey, "")
 End Function
 
 ' ==============================================================================

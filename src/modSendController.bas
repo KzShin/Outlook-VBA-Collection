@@ -18,8 +18,6 @@ Private Const DEFAULT_HOLIDAYS As String = "12-29,12-30,12-31,01-01,01-02,01-03"
 
 ' --- グローバル変数 (Module Level) ---
 Private g_RunId As String           ' 実行ログ用ID
-Private g_ConfigCache As Object     ' 設定キャッシュ (Dictionary)
-Private g_IsConfigLoaded As Boolean ' 設定読み込み済みフラグ
 
 ' ==============================================================================
 ' [Public] 公開インターフェース
@@ -48,9 +46,6 @@ Public Sub Execute(ByVal Item As Object, ByRef Cancel As Boolean)
     Set m = Item
     Log "Subject=" & SafeStr(m.Subject) & " / Attachments=" & m.Attachments.Count
     
-    ' 3. 設定読み込み (初回のみ)
-    If Not g_IsConfigLoaded Then LoadConfig
-    
     ' --- フロー実行 ---
     
     ' Step 1: 添付忘れ確認
@@ -76,6 +71,8 @@ Public Sub Execute(ByVal Item As Object, ByRef Cancel As Boolean)
 
 FIN:
     Log "=== END SendController / Cancel=" & CStr(Cancel) & " ==="
+    SetRunId "NoID"
+    modLogger.SetRunId "NoID"
     Exit Sub
 
 EH:
@@ -84,6 +81,8 @@ EH:
     Cancel = True
     ' エラー時は念のため下書きへ退避
     SaveToDraftsSafe Item
+    SetRunId "NoID"
+    modLogger.SetRunId "NoID"
 End Sub
 
 ' ==============================================================================
@@ -100,7 +99,14 @@ Private Sub Log(ByVal msg As String)
 End Sub
 
 Private Function FormatTime(ByVal startTime As Double) As String
-    FormatTime = CStr(CLng((Timer - startTime) * 1000))
+    Dim elapsed As Double
+    Dim t As Double: t = Timer
+    If t >= startTime Then
+        elapsed = t - startTime
+    Else
+        elapsed = (86400# - startTime) + t
+    End If
+    FormatTime = CStr(CLng(elapsed * 1000))
 End Function
 
 Private Function SafeStr(ByVal s As String) As String
@@ -231,12 +237,13 @@ Private Function CheckArchiveEncryption(ByVal path As String) As Boolean
     Dim shell As Object
     Set shell = CreateObject("WScript.Shell")
     
-    ' cmd.exe /c の引用符剥がれ対策として全体を囲む
+    ' cmd.exe /s /c で引用符構文を正規化し、-p"" と < nul を付与して対話プロンプト待ちを完全に防止
     Dim cmd As String
-    cmd = "cmd.exe /c """ & sevenZipPath & " l -slt """ & path & """ > """ & tempFile & """ 2> """ & logFile & """"" "
+    cmd = "cmd.exe /s /c """ & sevenZipPath & " l -slt """ & path & """ -p"""" < nul > """ & tempFile & """ 2> """ & logFile & """"
     
     Dim result As Long
     result = shell.Run(cmd, 0, True)
+    Set shell = Nothing
     
     If result <> 0 Then
         ' エラー内容(標準エラー出力)を読み取ってログに出す
@@ -246,7 +253,16 @@ Private Function CheckArchiveEncryption(ByVal path As String) As Boolean
         Log "7z Command Failed. Code=" & result
         Log "7z Error Details: " & Replace(Replace(errText, vbCrLf, " "), vbCr, " ")
         
-        CheckArchiveEncryption = False ' エラー時は安全側に倒す
+        ' ヘッダー暗号化(.7zの-mheなど)によりパスワードなしで一覧が開けない場合、暗号化されていると正しく判定
+        If InStr(1, errText, "encrypted archive", vbTextCompare) > 0 Or _
+           InStr(1, errText, "Wrong password", vbTextCompare) > 0 Or _
+           InStr(1, errText, "Headers Error", vbTextCompare) > 0 Or _
+           InStr(1, errText, "暗号化", vbTextCompare) > 0 Then
+            Log "Detected Header-Encrypted Archive (7z with -mhe)."
+            CheckArchiveEncryption = True
+        Else
+            CheckArchiveEncryption = False ' その他のエラー時は安全側に倒す
+        End If
         GoTo CLEANUP_FILES
     End If
     
@@ -254,8 +270,9 @@ Private Function CheckArchiveEncryption(ByVal path As String) As Boolean
     Dim output As String
     output = ReadAllText(tempFile)
     
-    ' 日本語環境対応 (暗号化 = +)
-    If InStr(output, "Encrypted = +") > 0 Or InStr(output, "暗号化 = +") > 0 Then
+    ' 日本語・英語環境対応 (暗号化 = + / Encrypted = +)
+    If InStr(1, output, "Encrypted = +", vbTextCompare) > 0 Or _
+       InStr(1, output, "暗号化 = +", vbTextCompare) > 0 Then
         CheckArchiveEncryption = True
     Else
         CheckArchiveEncryption = False
@@ -402,79 +419,18 @@ Private Function CalcDeferTime(ByVal baseTime As Date, ByVal startVal As Date, B
 End Function
 
 ' ==============================================================================
-' [Config] 設定読み込み (統合版 config.ini 対応)
+' [Config] 設定読み込み (modConfig 連携)
 ' ==============================================================================
-Private Sub LoadConfig()
-    On Error GoTo EH
-    Set g_ConfigCache = CreateObject("Scripting.Dictionary")
-    
-    Dim fso As Object: Set fso = CreateObject("Scripting.FileSystemObject")
-    Dim configPath As String
-    ' 統合設定ファイルのパス
-    configPath = Environ("APPDATA") & "\OutlookVBA\config.ini"
-    
-    If Not fso.FileExists(configPath) Then
-        Log "Config file not found: " & configPath
-        g_IsConfigLoaded = True
-        Exit Sub
-    End If
-    
-    ' ADODB.StreamによるUTF-8読み込み
-    Dim stm As Object: Set stm = CreateObject("ADODB.Stream")
-    With stm
-        .Type = 2 ' adTypeText
-        .Charset = "UTF-8"
-        .Open
-        .LoadFromFile configPath
-    End With
-    
-    Dim allText As String: allText = stm.ReadText(-1)
-    stm.Close
-    
-    ' 解析処理（セクション対応）
-    Dim lines() As String: lines = Split(Replace(allText, vbCrLf, vbLf), vbLf)
-    Dim i As Long, lineText As String, eqPos As Long
-    Dim key As String, val As String
-    Dim currentSection As String
-    
-    For i = LBound(lines) To UBound(lines)
-        lineText = Trim$(lines(i))
-        ' コメント(#)と空行をスキップ
-        If Len(lineText) > 0 And Left$(lineText, 1) <> "#" Then
-            
-            ' セクション判定 [SectionName]
-            If Left$(lineText, 1) = "[" And Right$(lineText, 1) = "]" Then
-                currentSection = LCase$(Mid$(lineText, 2, Len(lineText) - 2))
-            
-            ' [SendController] セクションのみ読み込む
-            ElseIf currentSection = "sendcontroller" Then
-                eqPos = InStr(lineText, "=")
-                If eqPos > 1 Then
-                    key = Trim$(Left$(lineText, eqPos - 1))
-                    val = Trim$(Mid$(lineText, eqPos + 1))
-                    g_ConfigCache(key) = val
-                End If
-            End If
-            
-        End If
-    Next i
-    
-    g_IsConfigLoaded = True
-    Log "Config Loaded Successfully."
-    Exit Sub
-EH:
-    Log "Config Load Error: " & Err.Description
-    g_IsConfigLoaded = True
-End Sub
 
 Private Function GetConfigValue(ByVal key As String, Optional ByVal defaultVal As String = "") As String
-    If Not g_IsConfigLoaded Then LoadConfig
-    
-    If g_ConfigCache.Exists(key) Then
-        GetConfigValue = g_ConfigCache(key)
+    Dim val As String
+    val = modConfig.GetConfigValue("SendController", key, "")
+    If Len(val) > 0 Then
+        GetConfigValue = val
     Else
-        ' キーが見つからずデフォルト値を使う場合にログ出力
-        Log "Config Key Not Found: [" & key & "] -> Using Default: " & defaultVal
+        If Len(defaultVal) > 0 Then
+            Log "Config Key Not Found: [" & key & "] -> Using Default: " & defaultVal
+        End If
         GetConfigValue = defaultVal
     End If
 End Function

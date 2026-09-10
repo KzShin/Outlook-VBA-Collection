@@ -147,66 +147,27 @@ EH:
 End Sub
 
 ' ==============================================================================
-' [Config] 設定読み込み
+' [Config] 設定読み込み (modConfig 連携)
 ' ==============================================================================
 
 Private Function LoadForwardDestinations() As Object
     Dim dict As Object
     Set dict = CreateObject("Scripting.Dictionary")
+    dict.CompareMode = 1 ' vbTextCompare
     
-    Dim fso As Object: Set fso = CreateObject("Scripting.FileSystemObject")
-    Dim configPath As String
-    configPath = Environ$("APPDATA") & "\OutlookVBA\config.ini"
+    Dim secDict As Object
+    Set secDict = modConfig.GetSection("ForwardMail")
     
-    If Not fso.FileExists(configPath) Then
-        Set LoadForwardDestinations = dict
-        Exit Function
-    End If
-    
-    ' UTF-8 読み込み
-    Dim stm As Object: Set stm = CreateObject("ADODB.Stream")
-    stm.Type = 2
-    stm.Charset = "UTF-8"
-    stm.Open
-    stm.LoadFromFile configPath
-    
-    Dim allText As String: allText = stm.ReadText(-1)
-    stm.Close
-    
-    Dim lines() As String: lines = Split(Replace(allText, vbCrLf, vbLf), vbLf)
-    Dim i As Long, lineText As String
-    Dim currentSection As String
-    Dim parts() As String, destParts() As String
-    Dim emails As String
-    
-    For i = LBound(lines) To UBound(lines)
-        lineText = Trim$(lines(i))
-        If Len(lineText) > 0 And Left$(lineText, 1) <> "#" Then
-            
-            ' セクション判定
-            If Left$(lineText, 1) = "[" And Right$(lineText, 1) = "]" Then
-                currentSection = LCase$(Mid$(lineText, 2, Len(lineText) - 2))
-            
-            ' [ForwardMail] セクションのみ処理
-            ElseIf currentSection = "forwardmail" Then
-                parts = Split(lineText, "=", 2)
-                If UBound(parts) = 1 Then
-                    ' 値をカンマで「2つ」に分割 (表示名 , アドレス群)
-                    ' ※これで、アドレス側にカンマが含まれていても分割されません
-                    destParts = Split(parts(1), ",", 2)
-                    If UBound(destParts) = 1 Then
-                        ' メールアドレスに含まれる可能性のあるカンマをセミコロンに変換
-                        ' （ユーザーが間違えてカンマで区切っても自動補正します）
-                        emails = Replace(Trim$(destParts(1)), ",", ";")
-                        
-                        ' Dictionary に追加 (Key:表示名, Value:セミコロン区切りのアドレス群)
-                        dict.Add Trim$(destParts(0)), emails
-                    End If
-                End If
-            End If
-            
+    Dim k As Variant, lineVal As String, destParts() As String, emails As String
+    For Each k In secDict.Keys
+        lineVal = Trim$(secDict(k))
+        ' 値をカンマで「2つ」に分割 (表示名 , アドレス群)
+        destParts = Split(lineVal, ",", 2)
+        If UBound(destParts) = 1 Then
+            emails = Replace(Trim$(destParts(1)), ",", ";")
+            dict(Trim$(destParts(0))) = emails
         End If
-    Next i
+    Next k
     
     Set LoadForwardDestinations = dict
 End Function

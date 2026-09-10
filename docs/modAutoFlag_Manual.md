@@ -20,15 +20,19 @@
 
 * Windows 10 / 11
 * Microsoft Outlook (Classic Desktop)
-* **必須モジュール**: `modLogger.bas` (本リポジトリに同梱されている共通ログモジュール)
+* **共通モジュール**:
+    * `src/modConfig.bas` (同梱の共通設定モジュール)
+    * `src/modLogger.bas` (同梱の共通ログモジュール)
 
 ## インストール
 
 1. このリポジトリのファイルをダウンロードします。
 2. Outlookを起動し、`Alt + F11` でVBAエディタを開きます。
 3. **モジュールのインポート**:
-    * `File` > `Import File` から **`src/modAutoFlag.bas`** をインポートします。
-    * 続けて、**`src/modLogger.bas`** もインポートします（※本ツールは `modLogger` に依存しているため、必ず両方インポートしてください）。
+    * `File` > `Import File` から以下の**3つのファイル**をインポートします。
+        1. `src/modConfig.bas` (必須：設定読み込み用)
+        2. `src/modLogger.bas` (必須：ログ出力用)
+        3. `src/modAutoFlag.bas` (本体)
 
 
 4. **ThisOutlookSessionの設定**:
