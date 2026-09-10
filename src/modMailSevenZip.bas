@@ -3,171 +3,218 @@ Option Explicit
 
 ' ==============================================================================
 ' Module: modMailSevenZip
-' Description: メール添付ファイルを保存し、7-Zipを使用して自動解凍を行うモジュール
-' Dependencies: 7-Zip, modLogger
-' Configuration: %APPDATA%\OutlookVBA\SevenZipPasswords.txt (for Password List)
-'                %APPDATA%\OutlookVBA\config.ini ([General] Section)
+' Description: メール添付ファイルを保存し、必要に応じて7-Zipで解凍・結合を行う統合モジュール
+'              - 単一メール選択時: 通常の添付ファイル保存とZip/7z解凍
+'              - 複数メール選択時: 分割Zip(.001など)の保存、結合、解凍
+' Dependencies: modLogger, Scripting.FileSystemObject, ADODB.Stream, WScript.Shell
+' Configuration: %APPDATA%\OutlookVBA\SevenZipPasswords.txt (解凍パスワードリスト)
 ' ==============================================================================
-
-' --- ThisOutlookSessionでの呼び出し例 ---
-' Public Sub メールをダウンロードフォルダに保存()
-'     modMailSevenZip.SaveAndExtractAttachments
-' End Sub
 
 ' ==============================================================================
 ' [Private] ログ出力ヘルパー（modLoggerへの委譲）
 ' ==============================================================================
-
 Private Sub Log(ByVal msg As String)
     modLogger.Log "MailSevenZip", msg
 End Sub
 
-
 ' ==============================================================================
-' [Main] メイン処理
+' [Main] メイン処理 (エントリーポイント)
 ' ==============================================================================
 
-' 選択したメールを保存し、アーカイブであれば解凍を試みる
+' 選択したメールを保存し、アーカイブであれば解凍を試みる（単一/複数 自動判定）
 Public Sub SaveAndExtractAttachments()
     On Error GoTo EH
-    
-    ' --- 変更: 実行IDをモジュール内部で生成・セットする（自己完結化） ---
+
     Dim runId As String
     runId = Format(Now, "yymmdd-hhnnss") & "-SAVE"
     modLogger.SetRunId runId
-    
+
     Log "=== START メール保存・解凍処理 ==="
-    
-    ' 1. メール選択チェック
-    Dim objItem As Object
-    If Application.ActiveExplorer.Selection.Count = 0 Then
+
+    Dim sel As Outlook.Selection
+    Set sel = Application.ActiveExplorer.Selection
+
+    If sel.Count = 0 Then
         MsgBox "メールを選択してください。", vbExclamation
         Log "選択なし：処理終了"
-        modLogger.SetRunId "NoID" ' IDリセット
+        modLogger.SetRunId "NoID"
         Exit Sub
     End If
-    
-    Set objItem = Application.ActiveExplorer.Selection(1)
-    If objItem.Class <> olMail Then
-        MsgBox "選択されたアイテムはメールではありません。", vbExclamation
-        Log "非メールアイテム：Class=" & objItem.Class & " : 処理終了"
-        modLogger.SetRunId "NoID" ' IDリセット
-        Exit Sub
-    End If
-    
-    Dim mail As Outlook.MailItem
-    Set mail = objItem
-    Log "対象メール：Subject=""" & mail.Subject & """ / Received=" & mail.ReceivedTime
-    
-    ' 2. 保存先パスの構築
-    Dim receivedDate As String
-    receivedDate = Format(mail.ReceivedTime, "yymmdd_hhnnss")
-    
-    Dim safeSubject As String
-    safeSubject = SafeName(mail.Subject)
-    
-    Dim rootPath As String
-    rootPath = Environ$("USERPROFILE") & "\Downloads\" & receivedDate & "_" & safeSubject & "\"
-    Log "保存先ルート：" & rootPath
-    
+
     Dim fso As Object
     Set fso = CreateObject("Scripting.FileSystemObject")
-    
-    ' 既存フォルダチェック
-    If fso.FolderExists(rootPath) Then
-        MsgBox "保存先フォルダが既に存在します。既存フォルダを開きます。" & vbCrLf & rootPath, vbInformation
-        Log "既存フォルダ検出：処理中止 " & rootPath
-        Shell "explorer.exe " & """" & rootPath & """", vbNormalFocus
-        modLogger.SetRunId "NoID" ' IDリセット
-        Exit Sub
-    End If
-    
-    ' フォルダ作成
-    fso.CreateFolder rootPath
-    Log "フォルダ作成済み：" & rootPath
-    
-    ' 3. 7-Zip 環境確認 (共通モジュールの設定を利用)
-    Dim sevenZipPath As String
-    sevenZipPath = modLogger.GetSevenZipPath() 
-    Dim has7zip As Boolean
-    has7zip = (Len(sevenZipPath) > 0)
-    
-    If Not has7zip Then
-        MsgBox "7-Zip が見つかりません。展開処理はスキップします。", vbExclamation
-        Log "7-Zip未検出：展開スキップ"
+
+    If sel.Count = 1 Then
+        Log "モード: 単一メール処理"
+        ProcessSingleMail sel(1), fso
     Else
-        Log "7-Zip検出：" & sevenZipPath
+        Log "モード: 複数メール処理（分割Zip結合）"
+        ProcessSplitArchives sel, fso
     End If
-    
-    ' 4. 添付ファイルの保存と解凍処理
-    Dim att As Outlook.Attachment
-    For Each att In mail.Attachments
-        Dim savePath As String
-        savePath = fso.BuildPath(rootPath, att.FileName)
-        savePath = MakeUniqueFilePath(fso, savePath)
-        
-        ' ファイル保存
-        Log "添付保存開始：""" & att.FileName & """ -> " & savePath
-        att.SaveAsFile savePath
-        Log "添付保存完了：" & savePath
-        
-        ' アーカイブ処理（.zip / .7z）
-        If has7zip And IsArchiveTarget(att.FileName) Then
-            Dim baseName As String
-            baseName = SafeName(fso.GetBaseName(att.FileName))
-            
-            Dim outDir As String
-            outDir = fso.BuildPath(rootPath, baseName)
-            outDir = MakeUniqueFolderPath(fso, outDir)
-            fso.CreateFolder outDir
-            Log "展開先フォルダ作成：" & outDir
-            
-            ' 解凍試行（タイムアウト 120秒）
-            Dim ok As Boolean
-            Dim cancelled As Boolean
-            Log "事前テスト開始：" & savePath
-            
-            ok = TestThenExtractArchive(savePath, outDir, sevenZipPath, mail.ReceivedTime, 120, cancelled)
-            
-            If ok Then
-                Log "展開成功：" & outDir
-            Else
-                Log "展開失敗：全候補不一致またはタイムアウト。後処理を実行"
-                DeleteFolderIfEmpty fso, outDir
-                
-                If cancelled Then
-                    Log "ユーザーキャンセルにより終了"
-                Else
-                    MsgBox "パスワード候補では解凍できませんでした: " & att.FileName & vbCrLf & _
-                           "アーカイブは保存したままにしています。", vbInformation
-                End If
-            End If
-        Else
-            Log "非対象拡張子または7-Zipなし：保存のみ。 File=" & att.FileName
-        End If
-    Next att
-    
-    ' 5. メタデータ保存（メール本文など）
-    Dim infoPath As String
-    infoPath = fso.BuildPath(rootPath, "メール本文.txt")
-    Log "本文書き出し開始：" & infoPath
-    WriteTextUtf8 infoPath, BuildMailInfoText(mail)
-    Log "本文書き出し完了：" & infoPath
-    
-    ' 6. 完了後のフォルダ表示
-    Log "エクスプローラ起動：" & rootPath
-    Shell "explorer.exe " & """" & rootPath & """", vbNormalFocus
-    
+
     Log "=== END メール保存・解凍処理 ==="
-    
-    ' --- 変更: 他の処理に引き継がせないようIDをリセット ---
     modLogger.SetRunId "NoID"
     Exit Sub
 
 EH:
     Log "ERROR #" & Err.Number & " : " & Err.Description
     MsgBox "エラーが発生しました: " & Err.Number & vbCrLf & Err.Description, vbCritical
-    modLogger.SetRunId "NoID" ' エラー時もリセット
+    modLogger.SetRunId "NoID"
+End Sub
+
+
+' ==============================================================================
+' [Processor] 個別処理ロジック
+' ==============================================================================
+
+' --- 単一メール処理 ---
+Private Sub ProcessSingleMail(ByVal objItem As Object, ByVal fso As Object)
+    If objItem.Class <> olMail Then
+        MsgBox "選択されたアイテムはメールではありません。", vbExclamation
+        Log "非メールアイテム：処理終了"
+        Exit Sub
+    End If
+
+    Dim mail As Outlook.MailItem
+    Set mail = objItem
+    Log "対象：" & mail.Subject
+
+    ' ルートフォルダ構築
+    Dim rootPath As String
+    rootPath = Environ$("USERPROFILE") & "\Downloads\" & _
+               Format(mail.ReceivedTime, "yymmdd_hhnnss") & "_" & SafeName(mail.Subject) & "\"
+
+    If fso.FolderExists(rootPath) Then
+        MsgBox "保存先フォルダが既に存在します。" & vbCrLf & rootPath, vbInformation
+        Shell "explorer.exe " & """" & rootPath & """", vbNormalFocus
+        Exit Sub
+    End If
+
+    fso.CreateFolder rootPath
+    Log "フォルダ作成：" & rootPath
+
+    ' 7-Zip 環境確認
+    Dim sevenZipPath As String: sevenZipPath = modLogger.GetSevenZipPath()
+    Dim has7zip As Boolean: has7zip = (Len(sevenZipPath) > 0)
+
+    ' 添付ファイルの保存と解凍
+    Dim att As Outlook.Attachment
+    For Each att In mail.Attachments
+        Dim savePath As String
+        savePath = MakeUniqueFilePath(fso, fso.BuildPath(rootPath, att.FileName))
+
+        Log "添付保存開始：" & att.FileName
+        att.SaveAsFile savePath
+
+        ' アーカイブ処理
+        If has7zip And IsArchiveTarget(att.FileName) Then
+            Dim outDir As String
+            outDir = MakeUniqueFolderPath(fso, fso.BuildPath(rootPath, SafeName(fso.GetBaseName(att.FileName))))
+            fso.CreateFolder outDir
+
+            Dim cancelled As Boolean
+            If TestThenExtractArchive(savePath, outDir, sevenZipPath, mail.ReceivedTime, 120, cancelled) Then
+                Log "展開成功：" & outDir
+            Else
+                DeleteFolderIfEmpty fso, outDir
+                If Not cancelled Then
+                    MsgBox "パスワード候補では解凍できませんでした: " & att.FileName, vbInformation
+                End If
+            End If
+        End If
+    Next att
+
+    ' 本文保存
+    WriteTextUtf8 fso.BuildPath(rootPath, "メール本文.txt"), BuildMailInfoText(mail)
+    Log "エクスプローラ起動"
+    Shell "explorer.exe " & """" & rootPath & """", vbNormalFocus
+End Sub
+
+' --- 複数メール処理（分割Zip） ---
+Private Sub ProcessSplitArchives(ByVal sel As Outlook.Selection, ByVal fso As Object)
+    Dim targetItem As Object, mail As Outlook.MailItem
+    Dim masterMail As Outlook.MailItem
+    Dim att As Outlook.Attachment
+    Dim baseName As String
+
+    ' 1. マスターメール（.001）特定
+    For Each targetItem In sel
+        If TypeName(targetItem) = "MailItem" Then
+            Set mail = targetItem
+            For Each att In mail.Attachments
+                If LCase$(Right$(att.FileName, 4)) = ".001" Then
+                    Set masterMail = mail
+                    baseName = fso.GetBaseName(att.FileName) ' 例: sample.zip
+                    baseName = fso.GetBaseName(baseName)     ' 例: sample
+                    Exit For
+                End If
+            Next
+        End If
+        If Not masterMail Is Nothing Then Exit For
+    Next
+
+    If masterMail Is Nothing Then
+        MsgBox "選択されたメールの中に分割ファイル ('.001') が見つかりません。", vbExclamation
+        Log "マスターメール未検出"
+        Exit Sub
+    End If
+
+    ' 2. ルートフォルダ構築
+    Dim rootPath As String
+    rootPath = Environ$("USERPROFILE") & "\Downloads\" & _
+               Format(masterMail.ReceivedTime, "yymmdd_hhnnss") & "_" & SafeName(masterMail.Subject) & "\"
+
+    If fso.FolderExists(rootPath) Then
+        MsgBox "保存先フォルダが既に存在します。" & vbCrLf & rootPath, vbInformation
+        Shell "explorer.exe " & """" & rootPath & """", vbNormalFocus
+        Exit Sub
+    End If
+
+    fso.CreateFolder rootPath
+    Log "フォルダ作成：" & rootPath
+
+    ' 3. 全メールの保存
+    Dim firstPartPath As String
+    For Each targetItem In sel
+        If TypeName(targetItem) = "MailItem" Then
+            Set mail = targetItem
+            For Each att In mail.Attachments
+                Dim savePath As String
+                savePath = MakeUniqueFilePath(fso, fso.BuildPath(rootPath, att.FileName))
+
+                att.SaveAsFile savePath
+                Log "添付保存：" & att.FileName
+
+                If LCase$(Right$(att.FileName, 4)) = ".001" Then firstPartPath = savePath
+
+                Dim ext As String: ext = fso.GetExtensionName(att.FileName)
+                If Len(ext) > 0 Then
+                    WriteTextUtf8 fso.BuildPath(rootPath, "メール本文" & ext & ".txt"), BuildMailInfoText(mail)
+                End If
+            Next
+        End If
+    Next
+
+    ' 4. 解凍処理
+    Dim sevenZipPath As String: sevenZipPath = modLogger.GetSevenZipPath()
+    If Len(sevenZipPath) > 0 And Len(firstPartPath) > 0 Then
+        Dim outDir As String
+        outDir = MakeUniqueFolderPath(fso, fso.BuildPath(rootPath, SafeName(baseName)))
+        fso.CreateFolder outDir
+
+        Dim cancelled As Boolean
+        If TestThenExtractArchive(firstPartPath, outDir, sevenZipPath, masterMail.ReceivedTime, 120, cancelled) Then
+            Log "展開成功：" & outDir
+        Else
+            DeleteFolderIfEmpty fso, outDir
+            If Not cancelled Then
+                MsgBox "パスワード候補では解凍できませんでした: " & fso.GetFileName(firstPartPath), vbInformation
+            End If
+        End If
+    End If
+
+    Log "エクスプローラ起動"
+    Shell "explorer.exe " & """" & rootPath & """", vbNormalFocus
 End Sub
 
 
@@ -175,144 +222,85 @@ End Sub
 ' [Core Logic] 解凍フロー制御
 ' ==============================================================================
 
-' アーカイブ判定 (.zip / .7z)
 Private Function IsArchiveTarget(ByVal fileName As String) As Boolean
-    Dim dotPos As Long
-    dotPos = InStrRev(fileName, ".")
-    If dotPos = 0 Then
-        IsArchiveTarget = False
-        Exit Function
-    End If
-    
-    Dim ext As String
-    ext = LCase$(Mid$(fileName, dotPos + 1))
-    
-    Dim isTarget As Boolean
-    isTarget = (ext = "zip" Or ext = "7z")
-    
-    Log "拡張子判定：" & ext & " -> " & IIf(isTarget, "対象", "非対象")
-    IsArchiveTarget = isTarget
+    Dim dotPos As Long: dotPos = InStrRev(fileName, ".")
+    If dotPos = 0 Then Exit Function
+    Dim ext As String: ext = LCase$(Mid$(fileName, dotPos + 1))
+    IsArchiveTarget = (ext = "zip" Or ext = "7z")
 End Function
 
-' テスト実行 → 解凍実行 の統合ロジック
 Private Function TestThenExtractArchive(ByVal zipPath As String, ByVal outDir As String, _
                                         ByVal sevenZipPath As String, ByVal receivedTime As Date, _
-                                        ByVal timeoutSeconds As Long, ByRef userCancelled As Boolean) As Boolean
+                                        ByVal timeoutSec As Long, ByRef userCancelled As Boolean) As Boolean
     userCancelled = False
     Dim rc As Long
 
-    ' 1) パスワード無しでのテスト
     Log "テスト（パス無し）実行"
-    rc = SevenZipTest(zipPath, sevenZipPath, "", timeoutSeconds)
-    
+    rc = SevenZipTest(zipPath, sevenZipPath, "", timeoutSec)
     If rc <= 1 Then
-        Log "テスト成功（パス無し）。抽出実行へ"
-        rc = SevenZipExtract(zipPath, outDir, sevenZipPath, "", timeoutSeconds)
-        Log "抽出（パス無し）終了コード：" & rc
-        
-        PauseSeconds 0.5 ' ファイルシステム同期待ち
+        rc = SevenZipExtract(zipPath, outDir, sevenZipPath, "", timeoutSec)
+        PauseSeconds 0.5
         If rc = 0 Or HasNonZeroFileDeep(outDir) Then
             TestThenExtractArchive = True
             Exit Function
         End If
-        Log "抽出後チェック：ファイル未生成のため続行"
     End If
 
-    ' 2) 登録済みパスワード候補でのテスト
-    Dim cands As Collection
-    Set cands = GetPasswordCandidates(receivedTime)
-    Log "候補数：" & cands.Count
-
-    Dim pw As Variant
-    Dim idx As Long: idx = 0
-    
+    Dim cands As Collection: Set cands = GetPasswordCandidates(receivedTime)
+    Dim pw As Variant, idx As Long: idx = 0
     For Each pw In cands
         idx = idx + 1
-        Log "テスト候補" & idx & " 試行"
-        rc = SevenZipTest(zipPath, sevenZipPath, CStr(pw), timeoutSeconds)
-
+        rc = SevenZipTest(zipPath, sevenZipPath, CStr(pw), timeoutSec)
         If rc <= 1 Then
-            Log "テスト成功：候補一致 → 抽出へ"
-            rc = SevenZipExtract(zipPath, outDir, sevenZipPath, CStr(pw), timeoutSeconds)
-            Log "抽出終了コード（候補" & idx & "）： " & rc
-            
-            PauseSeconds 0.5 ' ファイルシステム同期待ち
+            rc = SevenZipExtract(zipPath, outDir, sevenZipPath, CStr(pw), timeoutSec)
+            PauseSeconds 0.5
             If rc = 0 Or HasNonZeroFileDeep(outDir) Then
-                Log "抽出後チェック：成功"
                 TestThenExtractArchive = True
                 Exit Function
-            Else
-                Log "抽出後チェック：ファイル未生成のため次候補へ"
             End If
         End If
     Next pw
 
-    ' 3) 全候補失敗 → ユーザー手入力へ移行
-    Log "全候補失敗 → 手入力モード移行"
-    If PromptAndTryPassword(zipPath, outDir, sevenZipPath, timeoutSeconds, userCancelled) Then
+    If PromptAndTryPassword(zipPath, outDir, sevenZipPath, timeoutSec, userCancelled) Then
         TestThenExtractArchive = True
         Exit Function
     End If
-
-    ' 解凍不可
     TestThenExtractArchive = False
 End Function
 
-' 手入力による解凍試行（成功またはキャンセルまでループ）
 Private Function PromptAndTryPassword(ByVal zipPath As String, ByVal outDir As String, _
-                                      ByVal sevenZipPath As String, ByVal timeoutSeconds As Long, _
+                                      ByVal sevenZipPath As String, ByVal timeoutSec As Long, _
                                       ByRef userCancelled As Boolean) As Boolean
     On Error GoTo EH
-    Dim fso As Object
-    Set fso = CreateObject("Scripting.FileSystemObject")
-    Dim pw As String
-    Dim rc As Long
-
+    Dim fso As Object: Set fso = CreateObject("Scripting.FileSystemObject")
+    Dim pw As String, rc As Long
     userCancelled = False
 
     Do
-        pw = InputBox( _
-            Prompt:="登録済みパスワードでは解凍できませんでした。" & vbCrLf & _
-                    "解凍用パスワードを入力してください（キャンセルで中止）。", _
-            Title:="パスワード入力（7-Zip）" _
-        )
-
+        pw = InputBox("登録済みパスワードでは解凍できませんでした。" & vbCrLf & _
+                      "解凍用パスワードを入力してください（キャンセルで中止）。", "パスワード入力")
         If Len(pw) = 0 Then
-            Log "手入力：キャンセルまたは空入力のため中止"
             userCancelled = True
             PromptAndTryPassword = False
             Exit Function
         End If
 
-        ' リトライのためフォルダをリセット
         On Error Resume Next
         If fso.FolderExists(outDir) Then fso.DeleteFolder outDir, True
         fso.CreateFolder outDir
         On Error GoTo EH
 
-        ' テスト実行
-        Log "手入力PWでテスト開始"
-        rc = SevenZipTest(zipPath, sevenZipPath, pw, timeoutSeconds)
-
+        rc = SevenZipTest(zipPath, sevenZipPath, pw, timeoutSec)
         If rc <= 1 Then
-            Log "手入力PWで抽出開始"
-            rc = SevenZipExtract(zipPath, outDir, sevenZipPath, pw, timeoutSeconds)
-            
+            rc = SevenZipExtract(zipPath, outDir, sevenZipPath, pw, timeoutSec)
             PauseSeconds 0.5
             If rc = 0 Or HasNonZeroFileDeep(outDir) Then
-                Log "手入力PW：成功"
                 PromptAndTryPassword = True
                 Exit Function
-            Else
-                Log "手入力PW：抽出後ファイル確認できず → 再入力"
             End If
-        Else
-            Log "手入力PW：テスト失敗 → 再入力"
         End If
     Loop
-
 EH:
-    Log "PromptAndTryPassword エラー: " & Err.Number & " " & Err.Description
     PromptAndTryPassword = False
 End Function
 
@@ -321,62 +309,30 @@ End Function
 ' [7-Zip Wrapper] コマンドライン実行
 ' ==============================================================================
 
-' 7-Zip テスト (t command)
 Private Function SevenZipTest(ByVal zipPath As String, ByVal sevenZipPath As String, _
-                              ByVal password As String, ByVal timeoutSeconds As Long) As Long
-    Dim sh As Object
-    Set sh = CreateObject("WScript.Shell")
-
+                              ByVal password As String, ByVal timeoutSec As Long) As Long
+    Dim sh As Object: Set sh = CreateObject("WScript.Shell")
     Dim baseCmd As String
-    baseCmd = """" & sevenZipPath & """ t -y " & _
-              """" & zipPath & """" & _
-              " -bso0 -bse0 -bsp0"
+    baseCmd = """" & sevenZipPath & """ t -y """ & zipPath & """ -bso0 -bse0 -bsp0"
+    Dim cmd As String: cmd = baseCmd & " -p""" & password & """"
+    Log "7zテスト：" & baseCmd & " -p""" & MaskPassword(password) & """"
 
-    Dim cmd As String
-    Dim logCmd As String
-    
-    cmd = baseCmd & " -p""" & password & """"
-    ' ログ用のコマンドはパスワードをマスクする
-    logCmd = baseCmd & " -p""" & MaskPassword(password) & """"
-
-    Log "7zテスト起動：" & logCmd
-    Dim proc As Object
-    Set proc = sh.Exec(cmd)
-
-    SevenZipTest = WaitProcessWithTimeout(proc, timeoutSeconds)
-    Log "7zテスト終了コード：" & SevenZipTest
+    Dim proc As Object: Set proc = sh.Exec(cmd)
+    SevenZipTest = WaitProcessWithTimeout(proc, timeoutSec)
 End Function
 
-' 7-Zip 抽出 (x command)
 Private Function SevenZipExtract(ByVal zipPath As String, ByVal outDir As String, _
                                  ByVal sevenZipPath As String, ByVal password As String, _
-                                 ByVal timeoutSeconds As Long) As Long
-    Dim sh As Object
-    Set sh = CreateObject("WScript.Shell")
-
+                                 ByVal timeoutSec As Long) As Long
+    Dim sh As Object: Set sh = CreateObject("WScript.Shell")
     Dim baseCmd As String
-    baseCmd = """" & sevenZipPath & """ x -y " & _
-              """" & zipPath & """ -o""" & outDir & """" & _
-              " -bso0 -bse0 -bsp0"
+    baseCmd = """" & sevenZipPath & """ x -y """ & zipPath & """ -o""" & outDir & """ -bso0 -bse0 -bsp0"
+    Dim cmd As String: cmd = baseCmd
+    If Len(password) > 0 Then cmd = cmd & " -p""" & password & """"
+    Log "7z抽出：" & baseCmd & " -p""" & MaskPassword(password) & """"
 
-    Dim cmd As String
-    Dim logCmd As String
-    
-    cmd = baseCmd
-    logCmd = baseCmd
-
-    If Len(password) > 0 Then
-        cmd = cmd & " -p""" & password & """"
-        ' ログ用のコマンドはパスワードをマスクする
-        logCmd = logCmd & " -p""" & MaskPassword(password) & """"
-    End If
-
-    Log "7z抽出起動：" & logCmd
-    Dim proc As Object
-    Set proc = sh.Exec(cmd)
-
-    SevenZipExtract = WaitProcessWithTimeout(proc, timeoutSeconds)
-    Log "7z抽出終了コード：" & SevenZipExtract
+    Dim proc As Object: Set proc = sh.Exec(cmd)
+    SevenZipExtract = WaitProcessWithTimeout(proc, timeoutSec)
 End Function
 
 
@@ -384,96 +340,68 @@ End Function
 ' [Config] パスワード候補管理
 ' ==============================================================================
 
-' 外部定義ファイルからパスワード候補を取得
-' パス: %APPDATA%\OutlookVBA\SevenZipPasswords.txt
 Private Function GetPasswordCandidates(ByVal receivedTime As Date) As Collection
     Dim col As New Collection
-    Dim appData As String
-    appData = Environ$("APPDATA")
+    Dim folderPath As String: folderPath = Environ$("APPDATA") & "\OutlookVBA"
+    Dim listPath As String: listPath = folderPath & "\SevenZipPasswords.txt"
 
-    Dim folderPath As String
-    ' OutlookVBAフォルダへ統合
-    folderPath = appData & "\OutlookVBA"
-
-    Dim listPath As String
-    listPath = folderPath & "\SevenZipPasswords.txt"
-
-    ' 設定フォルダがない場合は作成のみ行う
     On Error Resume Next
     Dim fso As Object: Set fso = CreateObject("Scripting.FileSystemObject")
-    If Not fso.FolderExists(folderPath) Then
-        fso.CreateFolder folderPath
-        Log "設定フォルダ作成: " & folderPath
-    End If
+    If Not fso.FolderExists(folderPath) Then fso.CreateFolder folderPath
     On Error GoTo 0
 
-    ' ファイル読み込み
-    Dim loaded As Boolean
-    loaded = LoadPasswordsFromFile(listPath, receivedTime, col)
-
-    If Not loaded Then
-        Log "パスワードリスト読込なし（0件またはファイル未存在）: " & listPath
+    If LoadPasswordsFromFile(listPath, receivedTime, col) Then
+        Log "PW候補読込完了: " & col.Count & "件"
     End If
-
     Set GetPasswordCandidates = col
 End Function
 
-' ファイル読込と日付プレースホルダの展開
-Private Function LoadPasswordsFromFile(ByVal filePath As String, _
-                                       ByVal receivedTime As Date, _
-                                       ByRef outCol As Collection) As Boolean
+Private Function LoadPasswordsFromFile(ByVal filePath As String, ByVal receivedTime As Date, ByRef outCol As Collection) As Boolean
     On Error GoTo EH
     Dim fso As Object: Set fso = CreateObject("Scripting.FileSystemObject")
-    If Not fso.FileExists(filePath) Then
-        LoadPasswordsFromFile = False
-        Exit Function
-    End If
+    If Not fso.FileExists(filePath) Then Exit Function
 
-    ' 日付文字列の準備
-    Dim yyyy As String, yy As String, mm As String, dd As String
-    yyyy = Format(receivedTime, "yyyy")
-    yy = Right$(yyyy, 2)
-    mm = Format(receivedTime, "mm")
-    dd = Format(receivedTime, "dd")
+    Dim yyyy As String: yyyy = Format(receivedTime, "yyyy")
+    Dim yy As String: yy = Right$(yyyy, 2)
+    Dim mm As String: mm = Format(receivedTime, "mm")
+    Dim dd As String: dd = Format(receivedTime, "dd")
 
-    ' UTF-8 で読み込み
     Dim stm As Object: Set stm = CreateObject("ADODB.Stream")
-    stm.Type = 2
-    stm.Charset = "UTF-8"
-    stm.Open
-    stm.LoadFromFile filePath
+    stm.Type = 2: stm.Charset = "UTF-8": stm.Open: stm.LoadFromFile filePath
+    Dim allText As String: allText = stm.ReadText(-1): stm.Close
 
-    Dim allText As String
-    allText = stm.ReadText(-1)
-    stm.Close
-
-    Dim lines() As String
-    lines = Split(Replace(allText, vbCrLf, vbLf), vbLf)
-
+    Dim lines() As String: lines = Split(Replace(allText, vbCrLf, vbLf), vbLf)
     Dim i As Long, raw As String, expanded As String, cnt As Long
+
+    Dim isTarget As Boolean
     For i = LBound(lines) To UBound(lines)
         raw = Trim$(lines(i))
-        ' 空行とコメント(#)をスキップ
-        If Len(raw) > 0 And Left$(raw, 1) <> "#" Then
-            expanded = raw
-            expanded = Replace(expanded, "{yyyy}", yyyy)
-            expanded = Replace(expanded, "{yy}", yy)
-            expanded = Replace(expanded, "{mm}", mm)
-            expanded = Replace(expanded, "{dd}", dd)
+        isTarget = False
 
-            outCol.Add expanded
-            cnt = cnt + 1
-            ' ログ出力時のみパスワードをマスクする
-            Log "候補追加：" & MaskPassword(expanded)
+        If Len(raw) > 0 Then
+            If Len(raw) >= 2 And Left$(raw, 1) = """" And Right$(raw, 1) = """" Then
+                ' ダブルクォート囲み：クォートを除去して採用（"//" 始まりや空白保持も可能）
+                expanded = Mid$(raw, 2, Len(raw) - 2)
+                isTarget = True
+            ElseIf Left$(raw, 2) <> "//" Then
+                ' 通常のパスワード行（// コメント行以外、# 始まりもそのまま許可）
+                expanded = raw
+                isTarget = True
+            End If
+
+            If isTarget Then
+                expanded = Replace(expanded, "{yyyy}", yyyy)
+                expanded = Replace(expanded, "{yy}", yy)
+                expanded = Replace(expanded, "{mm}", mm)
+                expanded = Replace(expanded, "{dd}", dd)
+                outCol.Add expanded
+                cnt = cnt + 1
+            End If
         End If
     Next i
-
     LoadPasswordsFromFile = (cnt > 0)
-    Log "外部ファイル読込完了: " & cnt & "件"
     Exit Function
-
 EH:
-    Log "LoadPasswordsFromFile エラー: " & Err.Number & " " & Err.Description
     LoadPasswordsFromFile = False
 End Function
 
@@ -482,69 +410,49 @@ End Function
 ' [System] プロセス制御ユーティリティ
 ' ==============================================================================
 
-' プロセス待機（タイムアウト付き）
 Private Function WaitProcessWithTimeout(ByVal proc As Object, ByVal timeoutSeconds As Long) As Long
-    Dim startTick As Single
-    startTick = Timer
-
+    Dim startTick As Single: startTick = Timer
     Do
-        ' 標準出力・エラーのバッファ消費
         Do While Not proc.StdOut.AtEndOfStream
-            Dim s As String: s = proc.StdOut.Read(1024)
+            proc.StdOut.Read 1024
         Loop
         Do While Not proc.StdErr.AtEndOfStream
-            Dim e As String: e = proc.StdErr.Read(1024)
+            proc.StdErr.Read 1024
         Loop
 
         If Not IsProcessRunning(proc) Then Exit Do
 
-        ' タイムアウト監視
         If ElapsedSeconds(startTick) >= timeoutSeconds Then
-            Log "タイムアウト発生：" & ElapsedSeconds(startTick) & "秒 (PID=" & proc.ProcessID & ")"
             On Error Resume Next
             TerminateProcessByPID proc.ProcessID
             On Error GoTo 0
             WaitProcessWithTimeout = 255
             Exit Function
         End If
-
         PauseSeconds 0.05
     Loop
-
     WaitProcessWithTimeout = proc.ExitCode
 End Function
 
 Private Function IsProcessRunning(ByVal proc As Object) As Boolean
     On Error Resume Next
     Dim code As Long: code = proc.ExitCode
-    If Err.Number <> 0 Then
-        Err.Clear: IsProcessRunning = True
-    Else
-        IsProcessRunning = False
-    End If
+    IsProcessRunning = (Err.Number <> 0)
+    Err.Clear
     On Error GoTo 0
 End Function
 
 Private Sub TerminateProcessByPID(ByVal pid As Long)
     On Error Resume Next
-    Dim svc As Object, obj As Object
-    Set svc = GetObject("winmgmts:{impersonationLevel=impersonate}!\\.\root\cimv2")
-    Set obj = svc.Get("Win32_Process.Handle='" & pid & "'")
-    If Not obj Is Nothing Then
-        obj.Terminate
-        Log "プロセス強制終了: PID=" & pid
-    End If
+    Dim svc As Object: Set svc = GetObject("winmgmts:{impersonationLevel=impersonate}!\\.\root\cimv2")
+    Dim obj As Object: Set obj = svc.Get("Win32_Process.Handle='" & pid & "'")
+    If Not obj Is Nothing Then obj.Terminate
     On Error GoTo 0
 End Sub
 
-' Timerの日跨ぎを考慮した経過秒数計算
 Private Function ElapsedSeconds(ByVal startTick As Single) As Double
     Dim t As Double: t = Timer
-    If t >= startTick Then
-        ElapsedSeconds = t - startTick
-    Else
-        ElapsedSeconds = (86400# - startTick) + t
-    End If
+    If t >= startTick Then ElapsedSeconds = t - startTick Else ElapsedSeconds = (86400# - startTick) + t
 End Function
 
 Private Sub PauseSeconds(ByVal seconds As Double)
@@ -559,50 +467,28 @@ End Sub
 ' [Utils] ファイル・テキスト操作ユーティリティ
 ' ==============================================================================
 
-' パスワードのマスク処理（1文字おきに * に置換）
 Private Function MaskPassword(ByVal pw As String) As String
-    If Len(pw) = 0 Then
-        MaskPassword = ""
-        Exit Function
-    End If
-    
-    Dim i As Long
-    Dim res As String
-    res = ""
-    
+    Dim res As String, i As Long
     For i = 1 To Len(pw)
-        ' 奇数番目は元の文字、偶数番目は * にする
-        If i Mod 2 = 1 Then
-            res = res & Mid$(pw, i, 1)
-        Else
-            res = res & "*"
-        End If
+        If i Mod 2 = 1 Then res = res & Mid$(pw, i, 1) Else res = res & "*"
     Next i
-    
     MaskPassword = res
 End Function
 
-' フォルダ内のファイル存在確認（再帰）
 Private Function HasNonZeroFileDeep(ByVal folderPath As String) As Boolean
     On Error Resume Next
-    Dim fso As Object, fld As Object, f As Object, subf As Object
-    Set fso = CreateObject("Scripting.FileSystemObject")
+    Dim fso As Object: Set fso = CreateObject("Scripting.FileSystemObject")
     If Not fso.FolderExists(folderPath) Then Exit Function
+    Dim fld As Object: Set fld = fso.GetFolder(folderPath)
 
-    Set fld = fso.GetFolder(folderPath)
-
+    Dim f As Object
     For Each f In fld.Files
-        If f.Size > 0 Then
-            HasNonZeroFileDeep = True
-            Exit Function
-        End If
+        If f.Size > 0 Then HasNonZeroFileDeep = True: Exit Function
     Next f
 
+    Dim subf As Object
     For Each subf In fld.SubFolders
-        If HasNonZeroFileDeep(subf.path) Then
-            HasNonZeroFileDeep = True
-            Exit Function
-        End If
+        If HasNonZeroFileDeep(subf.path) Then HasNonZeroFileDeep = True: Exit Function
     Next subf
     On Error GoTo 0
 End Function
@@ -611,99 +497,55 @@ Private Sub DeleteFolderIfEmpty(ByVal fso As Object, ByVal folderPath As String)
     On Error Resume Next
     If fso.FolderExists(folderPath) Then
         Dim fld As Object: Set fld = fso.GetFolder(folderPath)
-        If fld.Files.Count = 0 And fld.SubFolders.Count = 0 Then
-            fso.DeleteFolder folderPath, True
-            Log "空フォルダ削除：" & folderPath
-        End If
+        If fld.Files.Count = 0 And fld.SubFolders.Count = 0 Then fso.DeleteFolder folderPath, True
     End If
 End Sub
 
-' ファイル名に使えない文字を置換
 Private Function SafeName(ByVal s As String) As String
     Dim r As String: r = s
-    r = Replace(r, "<", "_")
-    r = Replace(r, ">", "_")
-    r = Replace(r, ":", "_")
-    r = Replace(r, """", "_")
-    r = Replace(r, "/", "_")
-    r = Replace(r, "\", "_")
-    r = Replace(r, "|", "_")
-    r = Replace(r, "?", "_")
-    r = Replace(r, "*", "_")
-    r = Replace(r, vbCr, "_")
-    r = Replace(r, vbLf, "_")
-    r = Replace(r, vbTab, "_")
-    r = Trim$(r)
+    r = Replace(r, "<", "_"): r = Replace(r, ">", "_"): r = Replace(r, ":", "_")
+    r = Replace(r, """", "_"): r = Replace(r, "/", "_"): r = Replace(r, "\", "_")
+    r = Replace(r, "|", "_"): r = Replace(r, "?", "_"): r = Replace(r, "*", "_")
+    r = Replace(r, vbCr, "_"): r = Replace(r, vbLf, "_"): r = Replace(r, vbTab, "_")
     If Len(r) > 150 Then r = Left$(r, 150)
-    SafeName = r
+    SafeName = Trim$(r)
 End Function
 
-' 同名ファイルがある場合に連番を付与
 Private Function MakeUniqueFilePath(ByVal fso As Object, ByVal path As String) As String
-    If Not fso.FileExists(path) Then
-        MakeUniqueFilePath = path
-        Exit Function
-    End If
-    Dim folder As String, name As String, ext As String
-    folder = fso.GetParentFolderName(path)
-    name = fso.GetBaseName(path)
-    ext = fso.GetExtensionName(path)
-    
-    Dim i As Long, cand As String: i = 2
+    If Not fso.FileExists(path) Then MakeUniqueFilePath = path: Exit Function
+    Dim cand As String, i As Long: i = 2
     Do
-        cand = fso.BuildPath(folder, name & " (" & i & ")." & ext)
-        If Not fso.FileExists(cand) Then
-            MakeUniqueFilePath = cand
-            Exit Function
-        End If
+        cand = fso.BuildPath(fso.GetParentFolderName(path), fso.GetBaseName(path) & " (" & i & ")." & fso.GetExtensionName(path))
+        If Not fso.FileExists(cand) Then MakeUniqueFilePath = cand: Exit Function
         i = i + 1
     Loop
 End Function
 
-' 同名フォルダがある場合に連番を付与
 Private Function MakeUniqueFolderPath(ByVal fso As Object, ByVal path As String) As String
-    If Not fso.FolderExists(path) Then
-        MakeUniqueFolderPath = path
-        Exit Function
-    End If
-    Dim folder As String, name As String
-    folder = fso.GetParentFolderName(path)
-    name = fso.GetFileName(path)
-    
-    Dim i As Long, cand As String: i = 2
+    If Not fso.FolderExists(path) Then MakeUniqueFolderPath = path: Exit Function
+    Dim cand As String, i As Long: i = 2
     Do
-        cand = fso.BuildPath(folder, name & " (" & i & ")")
-        If Not fso.FolderExists(cand) Then
-            MakeUniqueFolderPath = cand
-            Exit Function
-        End If
+        cand = fso.BuildPath(fso.GetParentFolderName(path), fso.GetFileName(path) & " (" & i & ")")
+        If Not fso.FolderExists(cand) Then MakeUniqueFolderPath = cand: Exit Function
         i = i + 1
     Loop
 End Function
 
-' メタデータテキスト生成
 Private Function BuildMailInfoText(ByVal mail As Outlook.MailItem) As String
     Dim sb As String
-    sb = ""
-    sb = sb & "受信日時: " & mail.ReceivedTime & vbCrLf
-    sb = sb & "From: " & mail.SenderName & " <" & mail.SenderEmailAddress & ">" & vbCrLf
-    sb = sb & "To: " & mail.To & vbCrLf
-    sb = sb & "CC: " & mail.CC & vbCrLf
-    sb = sb & "件名: " & mail.Subject & vbCrLf
-    sb = sb & vbCrLf
-    sb = sb & "メール本文:" & vbCrLf
-    sb = sb & mail.Body & vbCrLf
+    sb = "受信日時: " & mail.ReceivedTime & vbCrLf & _
+         "From: " & mail.SenderName & " <" & mail.SenderEmailAddress & ">" & vbCrLf & _
+         "To: " & mail.To & vbCrLf & _
+         "CC: " & mail.CC & vbCrLf & _
+         "件名: " & mail.Subject & vbCrLf & vbCrLf & _
+         "メール本文:" & vbCrLf & mail.Body & vbCrLf
     BuildMailInfoText = sb
 End Function
 
-' UTF-8 テキスト書き出し
 Private Sub WriteTextUtf8(ByVal path As String, ByVal text As String)
-    Dim stm As Object
-    Set stm = CreateObject("ADODB.Stream")
-    stm.Type = 2          ' adTypeText
-    stm.Charset = "UTF-8"
-    stm.Open
+    Dim stm As Object: Set stm = CreateObject("ADODB.Stream")
+    stm.Type = 2: stm.Charset = "UTF-8": stm.Open
     stm.WriteText text
-    stm.SaveToFile path, 2 ' adSaveCreateOverWrite
+    stm.SaveToFile path, 2
     stm.Close
 End Sub
